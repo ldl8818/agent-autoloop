@@ -8,6 +8,7 @@ import path from "node:path";
 import { HOME } from "./home.ts";
 import { stablePath } from "./node-path.ts";
 import { powershell, processCommandSync, psQuote } from "./command.ts";
+import type { Config } from "./config.ts";
 
 const PROGRAM = path.join(import.meta.dirname, "..", "bin", "agent-autoloop.ts");
 /** Another install on this machine (another AGENT_AUTOLOOP_HOME) has a service of its own. */
@@ -251,6 +252,35 @@ export function serviceRunning() {
     return powershell(`$task = ${task()}; [string]($task -and $task.State -eq 'Running')`) === "True";
   if (process.platform === "darwin") return existsSync(plistFile()) && launchdHasIt();
   return spawnSync("systemctl", ["--user", "is-active", "--quiet", label()], { stdio: "ignore" }).status === 0;
+}
+
+/** Read-only diagnostics for services owned by another manager; lifecycle operations still use only our own label. */
+export function managedServiceStatuses(managed: Config["managedServices"]) {
+  if (managed === undefined) return null;
+  const invalid = (detail: string) => [{ running: false, message: `受管服务配置无效：${detail}` }];
+  if (
+    !managed ||
+    !Array.isArray(managed.launchd) ||
+    managed.launchd.length === 0 ||
+    managed.launchd.some((label) => typeof label !== "string" || !label.trim() || /[/\0\r\n]/.test(label))
+  )
+    return invalid("launchd 必须列出有效的服务名称");
+  if (process.platform !== "darwin") return invalid("launchd 服务只能在 macOS 上检查");
+  return managed.launchd.map((label) => {
+    const result = spawnSync("launchctl", ["print", `gui/${process.getuid!()}/${label}`], { encoding: "utf8" });
+    if (result.error || result.status !== 0) {
+      const detail = result.status === 113 ? "未载入" : "查询失败";
+      return { running: false, message: `受管服务未运行：${label}（${detail}）` };
+    }
+    // launchctl nests resource groups with their own states; only the job's first-level state and pid count.
+    const state = /^\tstate = (\S+)$/m.exec(result.stdout)?.[1];
+    const pid = Number(/^\tpid = (\d+)$/m.exec(result.stdout)?.[1]);
+    const running = state === "running" && pid > 1;
+    return {
+      running,
+      message: running ? `受管服务在跑：${label}` : `受管服务未运行：${label}（已载入，状态 ${state ?? "未知"}）`,
+    };
+  });
 }
 
 /** Whether its manager has the service going or starting: one stopped by hand, or no manager at all, isn't waited for. */

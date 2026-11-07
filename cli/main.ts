@@ -14,6 +14,7 @@ import { privateDirectory } from "../host/files.ts";
 import {
   aboveDesktop,
   installService,
+  managedServiceStatuses,
   removeService,
   restartService,
   runningUp,
@@ -506,7 +507,9 @@ async function doctor() {
       say(false, (error as Error).message);
     }
   }
-  if (serviceRunning()) say(true, "系统服务在跑");
+  const managed = managedServiceStatuses(config.managedServices);
+  if (managed) for (const status of managed) say(status.running, status.message);
+  else if (serviceRunning()) say(true, "系统服务在跑");
   else if (systemUnit()) say(true, "系统级服务在跑");
   else say(false, "系统服务没在跑：agent-autoloop service install");
   try {

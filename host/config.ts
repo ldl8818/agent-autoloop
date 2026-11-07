@@ -13,6 +13,7 @@ export type Config = {
   channels?: Record<string, ChannelConfig>;
   source?: { name: string; key: string };
   owner?: string;
+  managedServices?: { launchd: string[] };
 };
 
 export const CONFIG_FILE = path.join(HOME, "config.json");

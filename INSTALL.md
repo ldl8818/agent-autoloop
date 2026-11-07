@@ -89,6 +89,14 @@ Claude 要委托 Codex 处理网页时，可用[浏览器交接模板](examples/
 
 没有安装系统服务时，`doctor` 会显示服务未运行；检查中台、Agent 和桌面通道是否在线即可，不要为了消除这条提示安装真实服务。
 
+macOS 上由其他入口管理服务时，在私有 `config.json` 登记实际的 launchd 服务名：
+
+```json
+"managedServices": { "launchd": ["com.example.hub", "com.example.worker"] }
+```
+
+`doctor` 会逐项只读检查服务是否正在运行；已载入但未运行、未载入或查询失败都会报错。该配置只用于诊断，安装、停止和重启仍由原管理入口负责；不登记时继续检查程序自带的默认服务。
+
 ## 写第一条规则
 
 安装验证完成后，按用户希望自动处理的事从 [README 的场景模板](README.md#拿来即用的场景模板)选一个，再照[配置手册](skills/agent-autoloop/SKILL.md)写规则；用户还没指定用途时再问。用 `agent-autoloop check` 检查；改动几秒内生效。

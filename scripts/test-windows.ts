@@ -17,6 +17,7 @@ const unix = new Set([
   "examples",
   "install",
   "loop",
+  "managed-services",
   "plugin-node-path",
   "recipes",
   "releases",
