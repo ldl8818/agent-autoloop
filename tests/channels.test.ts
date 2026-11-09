@@ -39,6 +39,59 @@ const base: Card = {
   link: "https://hub.test/c/x",
 };
 
+// A custom plan must reach the asking thread as text, never as option zero or an empty answer.
+test("feishu: other plans stay collapsed until needed and disappear after answering", () => {
+  const open = render(base);
+  const form = open.body.elements.find((e) => e.tag === "form") as any;
+  assert.ok(form, "an ask offers a free-text answer");
+  const panel = form.elements[0];
+  assert.equal(panel.tag, "collapsible_panel");
+  assert.equal(panel.expanded, false);
+  assert.equal(panel.header.title.content, "其他方案：我来说明");
+  assert.equal(panel.elements[0].name, "answer");
+  assert.equal(panel.elements[1].name, "custom_answer_submit_5");
+  assert.equal(
+    render({ ...base, state: "decided" }).body.elements.some((e) => e.tag === "form"),
+    false,
+  );
+});
+
+test("feishu: submitting another plan carries the owner's literal text without choosing a preset", async () => {
+  const lark = join(dir, "lark-cli-custom-answer");
+  const events = [
+    { action_name: "custom_answer_submit_5", form_value: JSON.stringify({ answer: "   " }) },
+    {
+      action_name: "custom_answer_submit_5",
+      form_value: JSON.stringify({ answer: "先保留旧入口，改用备用来源。\n不要重发旧消息。" }),
+    },
+  ].map((event) => JSON.stringify({ ...event, action_value: "", operator_id: "ou_me", message_id: "om_5" }));
+  writeFileSync(
+    lark,
+    `#!/bin/sh\ncase "$*" in\n *"event consume"*)\n${events.map((line) => "printf '%s\\n' '" + line.replaceAll("'", "'\\''") + "'").join("\n")}\nexec sleep 30 ;;\n *) cat >/dev/null; echo '{"ok":true}' ;;\nesac\n`,
+  );
+  chmodSync(lark, 0o755);
+  const stop = new AbortController();
+  const answers: unknown[][] = [];
+  let received = () => {};
+  const done = new Promise<void>((resolve) => (received = resolve));
+  const hub = {
+    async nextCard() {
+      await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 2_000))]);
+      stop.abort();
+      return { card: null };
+    },
+    async answer(...args: unknown[]) {
+      answers.push(args);
+      received();
+      return { changed: true };
+    },
+  };
+  await feishu({ hub: hub as any, options: { user: "ou_me", lark }, log: () => {}, signal: stop.signal });
+  assert.deepEqual(answers, [
+    [5, { by: "ou_me", ref: "om_5", text: "先保留旧入口，改用备用来源。\n不要重发旧消息。" }],
+  ]);
+});
+
 test("a card shows its options while it's open, and what became of it after", () => {
   const open = render(base);
   const blocks = open.body.elements.filter((e) => e.tag === "interactive_container") as any[];

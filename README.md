@@ -157,6 +157,8 @@ Agent 结束了这一轮，问了你一个问题。它现在不占进程、不�
 | **通道**：去哪找你拍板 | [桌面通知](plugins/desktop/channel.ts)（默认开启）、[飞书](plugins/feishu/channel.ts)、[钉钉 / 企微 / Slack / Discord](plugins/webhook/templates.ts) | [说明](skills/agent-autoloop/SKILL.md#接一个通道) |
 | **交付**：把 CI/CD 也做成插件 | [`delivery`](plugins/delivery/delivery.ts) | [说明](skills/agent-autoloop/SKILL.md#交付流水线) |
 
+飞书决定卡除预设选项外，提供可展开的“其他方案：我来说明”。输入自己的方案后点“按我的说明继续”，原文作为自由回答回到提问的任务；也可用输入法语音转文字，检查后提交。空白输入不会回答卡片，首次回答生效，后续点击不会重复续跑。
+
 **实测情况：** Claude Code、Codex 和 ACP（官方 Codex ACP 适配器）跑通了多轮问答和跨进程会话续接；飞书跑通了发送、按钮回调和卡片更新；四种 Webhook 模板只在本地模拟服务上验证过，GitLab Webhook 按官方文档的格式测试，没连过真实 GitLab。这些文字通道靠回答链接拍板，要把 `hub.publicUrl` 配成手机或电脑能打开的地址。
 
 **内置 Agent 走第三方网关。** Claude Code、Codex 要接第三方模型服务，或者启动前要先设好环境变量，写一个设好变量再启动它的小脚本，在 Agent 里写 `"program": "脚本路径"`，会话续接和用量统计照旧，见[说明](skills/agent-autoloop/SKILL.md#接一个-agent)。

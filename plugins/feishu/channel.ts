@@ -74,6 +74,42 @@ export function render(card: Card) {
           },
         ]
       : [];
+  // Forms cannot be nested inside panels; put the panel inside a root-level form.
+  const customForm =
+    card.kind === "ask"
+      ? [
+          {
+            tag: "form",
+            name: `custom_answer_${card.id}`,
+            elements: [
+              {
+                tag: "collapsible_panel",
+                expanded: false,
+                header: { title: { tag: "plain_text", content: "其他方案：我来说明" } },
+                elements: [
+                  {
+                    tag: "input",
+                    name: "answer",
+                    input_type: "multiline_text",
+                    rows: 3,
+                    auto_resize: true,
+                    max_length: 1000,
+                    required: true,
+                    placeholder: { tag: "plain_text", content: "写下您的方案，也可用输入法语音转文字，检查后提交" },
+                  },
+                  {
+                    tag: "button",
+                    name: `custom_answer_submit_${card.id}`,
+                    form_action_type: "submit",
+                    type: "primary",
+                    text: { tag: "plain_text", content: "按我的说明继续" },
+                  },
+                ],
+              },
+            ],
+          },
+        ]
+      : [];
   return {
     schema: "2.0",
     config: { update_multi: true, enable_forward: false },
@@ -84,7 +120,9 @@ export function render(card: Card) {
     body: {
       elements: [
         ...(card.text ? [{ tag: "markdown", content: card.text }] : []),
-        ...(card.state === "open" ? [...noteForm, ...card.options.map(option)] : [...afterwards, ...noteSaid]),
+        ...(card.state === "open"
+          ? [...noteForm, ...card.options.map(option), ...customForm]
+          : [...afterwards, ...noteSaid]),
       ],
     },
   };
@@ -163,6 +201,16 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
     const event = JSON.parse(line);
     const form = safeJson(event.form_value);
     const value = safeJson(event.action_value);
+    const custom = /^custom_answer_submit_(\d+)$/.exec(String(event.action_name ?? ""));
+    if (custom) {
+      const text = form?.answer;
+      if (typeof text !== "string" || !text.trim() || text.length > 1000) return;
+      const answer = await hub.answer(Number(custom[1]), { text, by: event.operator_id, ref: event.message_id });
+      log(
+        `card ${custom[1]}: custom answer by ${event.operator_id}, ${answer.changed ? "counted" : "already settled"}`,
+      );
+      return;
+    }
     // A form's submit button can't carry a value, so its name holds the card's number.
     const named = /^handling_note_submit_(\d+)$/.exec(String(event.action_name ?? ""));
     const cardId = Number.isInteger(value?.card) ? value.card : named ? Number(named[1]) : null;
