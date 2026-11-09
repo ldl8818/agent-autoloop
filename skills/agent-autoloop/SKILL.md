@@ -108,6 +108,8 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 
 ## 交付流水线
 
+一般维护使用[分阶段维护流程](../../docs/维护工作流.md)：项目提供事实、受控动作和验收入口，岗位分别绑定 CLI Agent；不在每个项目另造队列、重试或阻塞等待。代码涉及 GitHub PR 时复用下面的交付流水线。
+
 需要这台接单电脑已有 `gh` 登录和审查程序。`delivery` 进程只执行本机插件和 main 指定的审查命令，PR 不检出、不在本机跑代码。先把项目的 `ops/delivery.json` 和审查要点放到 main：
 
 ```json

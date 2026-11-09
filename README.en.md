@@ -150,6 +150,8 @@ More: [Claude-to-Codex browser handoff](examples/recipes/browser-handoff/README.
 
 ## Plugin ecosystem: swap any of the four sides
 
+The optional [maintenance workflow](docs/维护工作流.md) separates planning, owner decisions, execution and independent verification. Each role can use Codex or Claude Code. Project hooks supply trusted facts and bounded actions; the existing hub owns scheduling and retries.
+
 Built-in plugins ship with the program and are enabled through configuration. Use `agent-autoloop add <git URL>` for third-party plugins.
 
 | Side | Built in | Setup |
