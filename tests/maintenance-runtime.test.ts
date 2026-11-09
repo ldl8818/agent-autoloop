@@ -1,5 +1,6 @@
 // Failure modes: native adapters lose stage sessions, retries re-run an already completed phase, author output goes
 // straight to the hub as instructions, or a lost coordinator response loses the next dispatch.
+// Personal stop hooks must not replace a stage's structured result with unrelated session housekeeping.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -27,9 +28,10 @@ import {appendFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 const prompt=process.argv.at(-1), session=process.argv.includes('resume')?process.argv.at(-2):randomUUID();
 const role=prompt.includes('规划员')?'plan':prompt.includes('独立验收员')?'verify':'execute';
+const isolated=process.argv.includes('features.hooks=false')&&process.argv.includes('features.memories=false');
 appendFileSync(${JSON.stringify(calls)}, JSON.stringify({role,session,args:process.argv.slice(2)})+'\\n');
 for(const value of [{type:'thread.started',thread_id:session},{type:'turn.started'},
-{type:'item.completed',item:{type:'agent_message',text:role==='plan'?JSON.stringify({title:'修复',steps:'修正源码',impact:'仅测试项目',rollback:'保留原提交',acceptance:'独立证据通过'}):role==='verify'?JSON.stringify({ok:true,summary:'独立检查通过'}):'已修改源码'}},
+{type:'item.completed',item:{type:'agent_message',text:!isolated?'会话整理未完成':role==='plan'?JSON.stringify({title:'修复',steps:'修正源码',impact:'仅测试项目',rollback:'保留原提交',acceptance:'独立证据通过'}):role==='verify'?JSON.stringify({ok:true,summary:'独立检查通过'}):'已修改源码'}},
 {type:'turn.completed',usage:{input_tokens:10,output_tokens:5}}]) console.log(JSON.stringify(value));
 `,
 );
