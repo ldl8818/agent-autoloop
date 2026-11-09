@@ -2,6 +2,7 @@
 // the worker loses a running turn or its answer; cancelling a turn leaves its child processes running; a program in a
 // folder whose name the console code page can't write (a Chinese user name) isn't found, so nothing installs or runs; a
 // powershell.exe an Agent left in the turn's folder runs, outside its sandbox, in place of the system's.
+// A machine without CodexSandboxUsers must still prepare a command; a handled lookup failure is not a failed turn.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -336,13 +337,31 @@ test("Windows notification text remains data in PowerShell", { skip: !windows },
   });
 });
 
+test("Windows Codex command preparation works without installing an elevated sandbox", { skip: !windows }, async () => {
+  const contextFile = join(scratch, "context without sandbox.json");
+  writeFileSync(contextFile, '{"answers":[]}');
+  const { default: codex } = await import("../plugins/codex/agent.ts");
+  const command = codex.command({
+    contextFile,
+    folder: scratch,
+    cwd: scratch,
+    prompt: "Read the context.",
+    access: "read",
+    session: "",
+    resume: null,
+    program: process.execPath,
+  });
+  assert.equal(command[0], process.execPath);
+  assert.ok(command.includes("exec"));
+});
+
 // The elevated Codex sandbox uses another Windows account, which cannot read a private hub's context file by default.
 test(
   "Windows Codex exposes its context to the sandbox, without exposing the master key",
   { skip: !windows || !!process.env.CI },
   async (t) => {
     const sid = powershell(
-      `try { ([Security.Principal.NTAccount]::new($env:COMPUTERNAME, 'CodexSandboxUsers')).Translate([Security.Principal.SecurityIdentifier]).Value } catch [Security.Principal.IdentityNotMappedException] { }`,
+      `try { ([Security.Principal.NTAccount]::new($env:COMPUTERNAME, 'CodexSandboxUsers')).Translate([Security.Principal.SecurityIdentifier]).Value } catch [Security.Principal.IdentityNotMappedException] { exit 0 }`,
     );
     if (!sid) return t.skip("Codex elevated sandbox is not installed");
     const home = join(scratch, "sandbox-data");

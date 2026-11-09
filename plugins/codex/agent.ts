@@ -16,7 +16,7 @@ export default {
     if (process.platform === "win32" && turn.contextFile)
       powershell(`
       try { $sid = ([Security.Principal.NTAccount]::new($env:COMPUTERNAME, 'CodexSandboxUsers')).Translate([Security.Principal.SecurityIdentifier]) }
-      catch [Security.Principal.IdentityNotMappedException] { return }
+      catch [Security.Principal.IdentityNotMappedException] { exit 0 }
       $file = ${psQuote(turn.contextFile)}
       $acl = [IO.File]::GetAccessControl($file)
       $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'Read', 'Allow'))
