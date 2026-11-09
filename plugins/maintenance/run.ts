@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { maintain, rules, validPlan, type Settings, type Task, type Role } from "./flow.ts";
+import { automatic, maintain, rules, validPlan, type Settings, type Task, type Role } from "./flow.ts";
 import type { Adapter, Reading, Turn } from "../../worker/agents.ts";
 
 export const read = (file: string) => JSON.parse(readFileSync(file, "utf8"));
@@ -58,6 +58,17 @@ export function settings(file: string): Settings {
       throw new Error("固定执行岗位缺少可信命令");
     if (role.command) role.command = role.command.map((part: string) => part.replaceAll("{root}", value.root));
   }
+  if (
+    value.requests &&
+    (!value.requests.source ||
+      !value.requests.type ||
+      typeof value.requests.source !== "string" ||
+      typeof value.requests.type !== "string")
+  )
+    throw new Error("本人任务入口需要固定来源和事件类型");
+  automatic(value);
+  if (value.contracts !== undefined && typeof value.contracts !== "boolean")
+    throw new Error("任务契约开关必须为布尔值");
   return value;
 }
 async function command(argv: string[], cwd: string, input: object, environment = process.env) {
@@ -121,6 +132,8 @@ function json(text: string) {
   );
 }
 export async function stage(s: Settings, role: Role, task: Task, turn: Partial<Turn>) {
+  if (role === "execute" && task.approved?.by === "configured-read-only" && !automatic(s))
+    return { ok: false, summary: "原只读授权与当前配置不一致，需要重新确认方案，未执行。" };
   const material = await hook(s, role, task);
   if (material.ok === false) return { ok: false, summary: material.summary };
   const input = join(turn.folder!, "maintenance-input.json");
@@ -128,6 +141,7 @@ export async function stage(s: Settings, role: Role, task: Task, turn: Partial<T
   write(input, {
     id: task.id,
     revision: task.revision,
+    contract: task.contract,
     plan: task.plan,
     incident: task.incident,
     input: task.input,
@@ -144,7 +158,7 @@ export async function stage(s: Settings, role: Role, task: Task, turn: Partial<T
     (material.prompt ?? "") +
     "\n" +
     (role === "plan"
-      ? "只读诊断，给出可实际执行的具体方案。最后仅输出 JSON，包含 title、steps、impact、rollback、acceptance 五个非空字符串，title最多120字，其余各600字。"
+      ? "只读诊断，给出可实际执行的具体方案，逐条回应任务契约，不更改约定的交付物与完成标准。最后仅输出 JSON，包含 title、steps、impact、rollback、acceptance 五个非空字符串，title最多120字，其余各600字。"
       : role === "verify"
         ? '独立核对批准方案和当前证据，不采信作者自述，不修改候选。最后仅输出 JSON：{"ok":true或false,"summary":"实际证据和未解决缺口"}。'
         : "只执行批准范围；先核对现状，结果未知时复查，不重复有副作用的操作。需要新增决定时立即结束并说明缺口。");
@@ -235,7 +249,7 @@ export async function run(config: string, mode: string, turn: Partial<Turn> & { 
           emit({ text: "维护状态已核对。\n```agent-autoloop\n" + JSON.stringify(preflight) + "\n```", finished: true });
           return;
         }
-        task.facts = io.load(task.id)!.facts;
+        Object.assign(task, io.load(task.id)!);
       }
       const attempt = task.attempts?.[mode as Role] ?? 0;
       const cache = join(s.state, task.id, `${task.revision}-${mode}-${attempt}.json`);

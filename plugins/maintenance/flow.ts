@@ -2,6 +2,13 @@
 import { createHash } from "node:crypto";
 
 export type Role = "plan" | "execute" | "verify";
+export type Contract = {
+  goal: string;
+  deliverable: string;
+  acceptance: string;
+  dueAt?: string;
+  completion?: "delivery" | "effect";
+};
 export type Settings = {
   id: string;
   root: string;
@@ -10,6 +17,9 @@ export type Settings = {
   channels?: string[];
   when: { source: string; types: string[] };
   recovered?: string[];
+  requests?: { source: string; type: string };
+  approval?: "required" | "read-only";
+  contracts?: boolean;
   hook: string[];
   roles: Record<
     Role,
@@ -29,13 +39,17 @@ export type Task = {
   revision: number;
   status: string;
   incident: any;
+  request?: true;
+  contractVersion?: 1;
+  contract?: Contract;
+  handoff?: { received?: string; verified?: string; effect?: string };
   facts?: any;
   plan?: any;
   input?: string;
   prepared?: any;
   execution?: any;
   verification?: any;
-  approved?: { card: number; by: string; at: string };
+  approved?: { card: number | null; by: string; at: string };
   dispatch?: any;
   scheduledAt?: string;
   attempts?: Partial<Record<Role, number>>;
@@ -57,9 +71,63 @@ const optionsFor = (t: Task) => (t.status === "blocked" ? (t.blockedRole ? CONTI
 const source = (s: Settings) => "maintenance-" + s.id;
 const about = (t: Task) => `maintenance:${t.id}:${t.revision}`;
 const timerKey = (t: Task) => `maintenance-${t.id}`;
+const checkKey = (t: Task) => `maintenance-check-${t.id}`;
+const displayTime = (at: string) =>
+  new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "short", timeStyle: "short" }).format(
+    new Date(at),
+  ) + "（北京时间）";
 const marker = /^(maintenance|maintenance-time):([a-f0-9]{32}):([1-9][0-9]*)$/;
+const stageNames: Record<string, string> = {
+  planning: "规划中",
+  approval: "等待决定",
+  executing: "执行中",
+  verifying: "独立验收中",
+  observing: "等待业务效果",
+  blocked: "等待恢复条件",
+  scheduled: "已改期",
+  scheduling: "等待确认时间",
+};
+
+export function automatic(s: Settings) {
+  if (!s.approval || s.approval === "required") return false;
+  if (
+    s.approval !== "read-only" ||
+    (["plan", "execute", "verify"] as Role[]).some((role) => s.roles[role]?.access !== "read")
+  )
+    throw new Error("自动继续只允许可信配置中的三个岗位全部只读");
+  return true;
+}
+
+export function validContract(value: any): value is Contract {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every((key) => ["goal", "deliverable", "acceptance", "dueAt", "completion"].includes(key)) &&
+    ["goal", "deliverable", "acceptance"].every(
+      (key) => typeof value[key] === "string" && value[key].trim() && value[key].length <= 1200,
+    ) &&
+    (value.completion === undefined || ["delivery", "effect"].includes(value.completion)) &&
+    (value.dueAt === undefined ||
+      (typeof value.dueAt === "string" &&
+        /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?(?:Z|[+-]\d\d:\d\d)$/.test(value.dueAt) &&
+        Number.isFinite(Date.parse(value.dueAt))))
+  );
+}
+
+export function validEvidence(value: any) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    ["version", "location", "environment"].every(
+      (key) => typeof value[key] === "string" && value[key].trim() && value[key].length <= 2000,
+    )
+  );
+}
 
 export function rules(s: Settings, configFile: string) {
+  automatic(s);
   const agents: Record<string, any> = {};
   const items = ["coordinate", "plan", "execute", "verify"].map((stage) => {
     const id = source(s) + "-" + stage;
@@ -100,6 +168,12 @@ export function rules(s: Settings, configFile: string) {
     name: source(s) + "-intake",
     when: { source: s.when.source, types: [...s.when.types, ...(s.recovered ?? [])] },
   });
+  if (s.requests)
+    items.push({
+      ...items[0],
+      name: source(s) + "-requests",
+      when: { source: s.requests.source, types: [s.requests.type] },
+    });
   return {
     timezone: "Asia/Shanghai",
     sources: { [source(s)]: { name: "维护阶段交接：" + s.id } },
@@ -121,11 +195,19 @@ export function validPlan(plan: any) {
 }
 
 export async function maintain(s: Settings, context: any, io: IO, now: number): Promise<Receipt> {
+  const auto = automatic(s);
   const output: Receipt = {};
   const append = (kind: keyof Receipt, value: any) => (output[kind] ??= []).push(value);
-  const notify = (t: Task, text: string) =>
-    append("notice", { title: "维护进度", text, key: `${t.id}:${t.revision}:${t.status}`, fyi: true });
-  const cancelTimer = (t: Task) => append("later", { key: timerKey(t), cancel: true });
+  const notify = (t: Task, text: string, kind = "status") =>
+    append("notice", { title: "任务进度", text, key: `${t.id}:${t.revision}:${t.status}:${kind}`, fyi: true });
+  const cancelTimer = (t: Task) => {
+    append("later", { key: timerKey(t), cancel: true });
+    if (t.contract?.dueAt) append("later", { key: checkKey(t), cancel: true });
+  };
+  const scheduleCheck = (t: Task) => {
+    if (t.contract?.dueAt && Date.parse(t.contract.dueAt) > now)
+      append("later", { key: checkKey(t), at: t.contract.dueAt, about: about(t) });
+  };
   const dispatch = (t: Task, role: Role) => {
     const event = {
       id: `${t.id}:${t.revision}:${role}:${t.attempts?.[role] ?? 0}`,
@@ -144,6 +226,9 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       title: plan?.title ?? "维护需要补充条件",
       key: `${t.id}:${t.revision}:${t.status}`,
       text:
+        (t.contract
+          ? `目标：${t.contract.goal.slice(0, 400)}\n交付物：${t.contract.deliverable.slice(0, 300)}\n`
+          : "") +
         (message ??
           (t.status === "blocked"
             ? (t.blockedMessage ?? "请恢复本阶段的具体前置条件后继续。")
@@ -157,7 +242,16 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
   const inspect = async (t: Task) => {
     const result = await io.hook("inspect", t);
     t.facts = result.facts;
+    if (result.contract !== undefined && !t.contract) {
+      if (!validContract(result.contract)) {
+        t.status = "blocked";
+        question(t, "项目任务契约缺少目标、交付物或完成标准，需要修正可信项目入口。");
+        return false;
+      }
+      t.contract = result.contract;
+    }
     if (result.status === "resolved") {
+      if (t.status === "observing") t.handoff = { ...t.handoff, effect: new Date(now).toISOString() };
       t.status = "done";
       delete t.dispatch;
       cancelTimer(t);
@@ -190,6 +284,34 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
   };
 
   for (const event of context.events ?? []) {
+    if (s.requests && event.source === s.requests.source && event.type === s.requests.type) {
+      const id = createHash("sha256")
+        .update(s.id + ":" + event.source + ":" + event.id)
+        .digest("hex")
+        .slice(0, 32);
+      if (io.load(id)) continue;
+      let contract: any;
+      try {
+        contract = JSON.parse(event.detail);
+      } catch {
+        /* Invalid material stays data. */
+      }
+      if (!validContract(contract)) {
+        append("notice", {
+          title: "任务未登记",
+          text: "任务资料需要目标、交付物和完成标准，且不能包含程序、目录或权限字段。",
+          key: `invalid-request:${id}`,
+          fyi: true,
+        });
+        continue;
+      }
+      const task: Task = { id, revision: 1, status: "planning", incident: event, request: true, contract };
+      dispatch(task, "plan");
+      scheduleCheck(task);
+      notify(task, `已登记任务：${contract.goal}\n交付物：${contract.deliverable}\n维护单：${id}`, "registered");
+      io.save(task);
+      continue;
+    }
     if (event.source === s.when.source && s.recovered?.includes(event.type)) {
       for (const t of io.related?.(event.subject) ?? []) {
         if (!["done", "cancelled"].includes(t.status))
@@ -208,6 +330,9 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       if (t && ["deferred", "blocked"].includes(t.status)) {
         t.status = t.blockedRole ? "blocked" : t.plan ? "approval" : "planning";
         if (await inspect(t)) {
+          scheduleCheck(t);
+          if (t.contract?.dueAt && Date.parse(t.contract.dueAt) <= now)
+            notify(t, `原约定检查时间 ${displayTime(t.contract.dueAt)} 已逾期；恢复后继续核对，未覆盖原承诺。`, "due");
           if (t.status === "planning") dispatch(t, "plan");
           else question(t);
         }
@@ -223,7 +348,13 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       let task = io.load(id);
       if (!task || (["done", "cancelled"].includes(task.status) && task.incident.id !== event.id)) {
         const revision = task ? task.revision + 1 : 1;
-        task = { id, revision, status: "planning", incident: event };
+        task = {
+          id,
+          revision,
+          status: "planning",
+          incident: event,
+          ...(s.contracts ? { contractVersion: 1 as const } : {}),
+        };
         dispatch(task, "plan");
         io.save(task);
       }
@@ -254,7 +385,10 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       if (validPlan(data.plan)) {
         t.plan = data.plan;
         t.status = "approval";
-        question(t);
+        if (auto) {
+          t.approved = { card: null, by: "configured-read-only", at: new Date(now).toISOString() };
+          await execute(t);
+        } else question(t);
       } else {
         t.status = "blocked";
         t.planning = data.result;
@@ -264,6 +398,7 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
     } else if (event.type === "maintenance.executed" && t.status === "executing") {
       delete t.dispatch;
       t.execution = data.result;
+      if (t.contract) t.handoff = { ...t.handoff, received: new Date(now).toISOString() };
       if (data.result?.ok === true) {
         t.status = "verifying";
         dispatch(t, "verify");
@@ -275,12 +410,23 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
     } else if (event.type === "maintenance.verified" && t.status === "verifying") {
       delete t.dispatch;
       t.verification = data.result;
+      const supported = !t.contract || validEvidence(data.result?.evidence);
       const accepted =
-        data.result?.ok === true ? await io.hook("accept", t) : { ok: false, summary: data.result?.summary };
+        data.result?.ok === true && supported
+          ? await io.hook("accept", t)
+          : {
+              ok: false,
+              summary: supported ? data.result?.summary : "独立验收缺少当前版本、证据位置和执行环境，未结案。",
+            };
       if (accepted.ok === true) {
-        t.status = "done";
-        cancelTimer(t);
-        notify(t, accepted.summary ?? data.result.summary);
+        if (t.contract) t.handoff = { ...t.handoff, verified: new Date(now).toISOString() };
+        t.status = t.contract?.completion === "effect" ? "observing" : "done";
+        if (t.status === "done") cancelTimer(t);
+        notify(
+          t,
+          (accepted.summary ?? data.result.summary ?? "交付验收通过。") +
+            (t.status === "observing" ? "\n业务效果待核实，等待原业务自然回执，未重跑业务。" : ""),
+        );
       } else {
         t.status = "blocked";
         if (data.result?.resumable) t.blockedRole = "verify";
@@ -349,7 +495,9 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       delete t.attempts;
       delete t.planning;
       delete t.blockedMessage;
+      delete t.handoff;
       cancelTimer(t);
+      scheduleCheck(t);
       if (await inspect(t)) dispatch(t, "plan");
     } else if (answer.choice === 0) {
       if (t.status === "blocked") {
@@ -411,6 +559,20 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
     const match = timer.about?.match(marker);
     if (!match) continue;
     const t = io.load(match[2]);
+    if (
+      t &&
+      t.revision === Number(match[3]) &&
+      timer.key === checkKey(t) &&
+      t.contract?.dueAt &&
+      !["done", "cancelled", "deferred"].includes(t.status)
+    ) {
+      notify(
+        t,
+        `约定检查时间：${displayTime(t.contract.dueAt)}\n当前阶段：${stageNames[t.status] ?? "待核实"}\n维护单：${t.id}。原承诺保留，未自动重做业务。`,
+        "due",
+      );
+      continue;
+    }
     if (!t || t.revision !== Number(match[3]) || t.status !== "scheduled" || Date.parse(t.scheduledAt!) > now) continue;
     await execute(t);
     io.save(t);

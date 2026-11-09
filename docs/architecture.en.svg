@@ -158,6 +158,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <text x="232" y="415" class="l" text-anchor="end">one tap resumes the chat</text>
 
 <!-- Bottom: Delivery pipeline -->
+<text x="260" y="566" class="s">Workflow: request → plan/decide → execute → verify; reuse workers</text>
 <rect class="plug" x="22" y="584" width="916" height="72" rx="14"/>
 <text x="40" y="614" class="h2">Code delivery pipeline</text>
 <text x="40" y="636" class="s">built-in plugin (event + agent)</text>

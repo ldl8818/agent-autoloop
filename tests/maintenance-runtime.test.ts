@@ -9,6 +9,7 @@ import { setup } from "./helpers.ts";
 import { readMessage } from "../worker/contract.ts";
 import maintenance from "../plugins/maintenance/agent.ts";
 import { rules } from "../plugins/maintenance/flow.ts";
+import { stage } from "../plugins/maintenance/run.ts";
 
 const home = setup("maintenance-runtime");
 mkdirSync(join(home, "plugins/maintenance"), { recursive: true });
@@ -40,7 +41,7 @@ const {stage,task}=JSON.parse(readFileSync(0,'utf8'));
 appendFileSync(${JSON.stringify(join(home, "hook-calls"))},stage+'\\n');
 const recovered=existsSync(${JSON.stringify(recoveryFile)})&&readFileSync(${JSON.stringify(recoveryFile)},'utf8')===task.incident?.id;
 const blocked=existsSync(${JSON.stringify(recoveryFile)})&&readFileSync(${JSON.stringify(recoveryFile)},'utf8')==='blocked:'+task.incident?.id;
-console.log(JSON.stringify(stage==='executed' && task.incident?.resumeFixture && !task.attempts?.execute?{ok:false,resumable:true,summary:'审查待修'}:stage==='status' && task.incident?.unknown?{ok:false,summary:'操作结果未知'}:stage==='inspect'?{status:recovered?'resolved':blocked?'blocked':'active',facts:{issue:'broken'}}:{ok:true,summary:'可信检查通过'}));`,
+console.log(JSON.stringify(stage==='executed' && task.incident?.resumeFixture && !task.attempts?.execute?{ok:false,resumable:true,summary:'审查待修'}:stage==='status' && task.incident?.unknown?{ok:false,summary:'操作结果未知'}:stage==='inspect'?{status:recovered?'resolved':blocked?'blocked':'active',facts:{issue:'broken'},...(task.incident?.subject==='contract-facts'?{contract:{goal:'可信项目契约',deliverable:'提交',acceptance:'核对'}}:{})}:{ok:true,summary:'可信检查通过',evidence:{version:'fixture-v1',location:${JSON.stringify(hook)},environment:'isolated-test'}}));`,
 );
 const config = join(home, "settings.json");
 writeFileSync(
@@ -279,4 +280,75 @@ test("an explicitly resumed repair invokes the original native session and retai
   assert.ok(callsAfter[1].args.includes("resume"));
   assert.equal(callsAfter[0].session, callsAfter[1].session);
   assert.deepEqual(JSON.parse(readFileSync(state, "utf8")).tasks[id].prepared, prepared);
+});
+
+test("an owner request crosses native stages with its contract and independently checked evidence", () => {
+  const previous = readFileSync(config, "utf8");
+  const settings = JSON.parse(previous);
+  settings.requests = { source: "owner", type: "task.requested" };
+  settings.approval = "read-only";
+  settings.roles.execute.access = "read";
+  writeFileSync(config, JSON.stringify(settings));
+  try {
+    const contract = { goal: "核对现役配置", deliverable: "只读报告", acceptance: "独立核对" };
+    const received = invoke(
+      "coordinate",
+      context([
+        {
+          source: "owner",
+          type: "task.requested",
+          id: "owner-native",
+          subject: "owner-native",
+          detail: JSON.stringify(contract),
+        },
+      ]),
+      200,
+    );
+    const asContext = (receipt: any) =>
+      context(receipt.events.map((event: any) => ({ ...event, source: "maintenance-sample" })));
+    const planned = invoke("plan", asContext(received), 201);
+    assert.equal(planned.events[0].type, "maintenance.execute");
+    assert.equal(
+      JSON.parse(readFileSync(join(home, "rounds/201/maintenance-input.json"), "utf8")).contract.goal,
+      contract.goal,
+    );
+    const executed = invoke("execute", asContext(planned), 202);
+    const verified = invoke("verify", asContext(executed), 203);
+    assert.ok(verified.notice.length);
+    const task = Object.values(JSON.parse(readFileSync(join(home, "state/flow.json"), "utf8")).tasks).find(
+      (task: any) => task.contract?.goal === contract.goal,
+    ) as any;
+    assert.equal(task.status, "done");
+    assert.ok(task.handoff.received);
+    assert.ok(task.handoff.verified);
+    const count = readFileSync(calls, "utf8").split("\n").length;
+    assert.deepEqual(invoke("execute", asContext(planned), 202), executed);
+    assert.equal(readFileSync(calls, "utf8").split("\n").length, count);
+  } finally {
+    writeFileSync(config, previous);
+  }
+});
+
+test("a configuration change cannot turn a read-only grant into an editing execution", async () => {
+  const settings = JSON.parse(readFileSync(config, "utf8"));
+  const before = readFileSync(join(home, "hook-calls"), "utf8");
+  const result = await stage(
+    settings,
+    "execute",
+    { approved: { card: null, by: "configured-read-only", at: "2026-11-10T00:00:00+08:00" } } as any,
+    {},
+  );
+  assert.equal(result.ok, false);
+  assert.equal(readFileSync(join(home, "hook-calls"), "utf8"), before);
+});
+
+test("native planning receives the contract obtained by its trusted preflight", () => {
+  const queued = invoke(
+    "coordinate",
+    context([{ source: "business", type: "failed", id: "contract-facts", subject: "contract-facts" }]),
+    300,
+  );
+  invoke("plan", context(queued.events.map((event: any) => ({ ...event, source: "maintenance-sample" }))), 301);
+  const input = JSON.parse(readFileSync(join(home, "rounds/301/maintenance-input.json"), "utf8"));
+  assert.equal(input.contract?.goal, "可信项目契约");
 });

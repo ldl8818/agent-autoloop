@@ -140,6 +140,7 @@ Agent 结束了这一轮，问了你一个问题。它现在不占进程、不�
 | [收件箱分诊](examples/recipes/inbox-triage/README.md) | 默认每天 8 点读过去 24 小时的未读邮件，写成清单和回复草稿；不发送、不改邮箱状态 |
 | [PR 自动交付](skills/agent-autoloop/SKILL.md#交付流水线) | 打上 `deliver` 标签后，审查、等 CI、合并、等发布并核对线上版本 |
 | [分阶段维护](docs/维护工作流.md) | 规划后发决定卡，批准、改期或暂缓；独立执行、独立验收，岗位可分别绑定 Codex 或 Claude Code |
+| [本人提出任务](docs/维护工作流.md#本人任务与交接证据) | 在已有对话说清目标，由 Agent 用现有事件入口登记；交付物、检查时间和独立证据留在同一工单 |
 
 **启用：** 打开对应说明。模板带任务 Skill 时，把它放进所用 Agent 的 skills 目录。把示例规则合入 `~/.agent-autoloop/rules.json`，替换电脑名和路径，再运行 `agent-autoloop check`。
 

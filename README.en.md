@@ -152,6 +152,8 @@ More: [Claude-to-Codex browser handoff](examples/recipes/browser-handoff/README.
 
 The optional [maintenance workflow](docs/维护工作流.md) separates planning, owner decisions, execution and independent verification. Each role can use Codex or Claude Code. Project hooks supply trusted facts and bounded actions; the existing hub owns scheduling and retries.
 
+An owner request can enter the same workflow through the existing event API. Its contract identifies the goal, deliverable and acceptance criteria; independent evidence identifies the version, location and environment. Delivery and observed business recovery remain separate. Scheduling reuses the hub and existing workers.
+
 Built-in plugins ship with the program and are enabled through configuration. Use `agent-autoloop add <git URL>` for third-party plugins.
 
 | Side | Built in | Setup |

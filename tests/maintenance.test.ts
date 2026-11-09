@@ -327,3 +327,143 @@ test("restoring unavailable facts resumes planning before any execution is appro
   assert.equal(out.events?.[0].type, "maintenance.plan");
   assert.ok(!f.calls.includes("prepare"));
 });
+
+test("a registered owner request keeps its contract and cannot dispatch twice", async () => {
+  const f = fixture();
+  const settings = { ...config, requests: { source: "owner", type: "task.requested" } };
+  const contract = {
+    goal: "核对现役任务",
+    deliverable: "核对报告",
+    acceptance: "逐项对照原记录",
+    dueAt: "2026-11-12T10:00:00+08:00",
+  };
+  const event = {
+    id: "request-1",
+    source: "owner",
+    type: "task.requested",
+    subject: "request-1",
+    detail: JSON.stringify(contract),
+  };
+  const out = await maintain(settings, f.context([event, event]), f.io, 1000);
+  assert.equal(f.tasks.size, 1);
+  assert.equal(out.events?.length, 1);
+  assert.equal((Array.from(f.tasks.values())[0] as any).contract.goal, contract.goal);
+  assert.equal(out.later?.[0].at, contract.dueAt);
+  assert.ok(rules(settings, "/trusted/config.json").rules.some((rule) => rule.when.source === "owner"));
+});
+
+test("invalid owner material cannot add commands or leave an untracked task", async () => {
+  const f = fixture();
+  const settings = { ...config, requests: { source: "owner", type: "task.requested" } };
+  const out = await maintain(
+    settings,
+    f.context([
+      {
+        id: "bad",
+        source: "owner",
+        type: "task.requested",
+        detail: JSON.stringify({ goal: "查看", deliverable: "报告", acceptance: "核实", command: ["unsafe"] }),
+      },
+    ]),
+    f.io,
+    1000,
+  );
+  assert.equal(f.tasks.size, 0);
+  assert.ok(!out.events?.length);
+  assert.ok(out.notice?.[0].text.includes("任务资料"));
+});
+
+test("a contracted delivery needs independent evidence before acceptance", async () => {
+  const f = fixture();
+  const task = await f.plan();
+  (task as any).contract = { goal: "修复", deliverable: "提交", acceptance: "原失败恢复", completion: "delivery" };
+  f.io.save(task);
+  await maintain(config, f.context([], [f.answer(task, 0)]), f.io, 1000);
+  await maintain(config, f.context([f.result(task, "executed", { result: { ok: true } })]), f.io, 1000);
+  await maintain(config, f.context([f.result(task, "verified", { result: { ok: true } })]), f.io, 1000);
+  assert.equal(f.tasks.get(task.id)!.status, "blocked");
+  assert.ok(!f.calls.includes("accept"));
+});
+
+test("delivery and original business recovery remain separate until evidence arrives", async () => {
+  const f = fixture();
+  const task = await f.plan();
+  (task as any).contract = { goal: "修复", deliverable: "提交", acceptance: "自然业务恢复", completion: "effect" };
+  f.io.save(task);
+  await maintain(config, f.context([], [f.answer(task, 0)]), f.io, 1000);
+  await maintain(config, f.context([f.result(task, "executed", { result: { ok: true } })]), f.io, 1000);
+  await maintain(
+    config,
+    f.context([
+      f.result(task, "verified", {
+        result: { ok: true, evidence: { version: "commit-1", location: "/evidence", environment: "isolated" } },
+      }),
+    ]),
+    f.io,
+    1000,
+  );
+  assert.equal(f.tasks.get(task.id)!.status, "observing");
+  f.io.hook = async (): Promise<any> => ({ status: "resolved", message: "原业务已恢复" });
+  await maintain(config, f.context([f.result(task, "recheck", {})]), f.io, 1000);
+  assert.equal(f.tasks.get(task.id)!.status, "done");
+});
+
+test("only a trusted configuration with three read-only roles can bypass another approval", async () => {
+  assert.throws(() => rules({ ...config, approval: "read-only" } as any, "/config.json"), /只读/);
+  const f = fixture();
+  const settings = {
+    ...config,
+    approval: "read-only",
+    roles: Object.fromEntries(Object.entries(config.roles).map(([key, value]) => [key, { ...value, access: "read" }])),
+  } as Settings;
+  const { task } = await f.start();
+  const out = await maintain(settings, f.context([f.result(task, "planned", { plan: proposal })]), f.io, 1000);
+  assert.equal(f.tasks.get(task.id)!.status, "executing");
+  assert.equal(out.events?.[0].type, "maintenance.execute");
+  assert.ok(!out.ask?.length);
+});
+
+test("a contract deadline reports unfinished work once without restarting it or overriding deferral", async () => {
+  const f = fixture();
+  const settings = { ...config, requests: { source: "owner", type: "task.requested" } };
+  const contract = { goal: "核对", deliverable: "报告", acceptance: "逐项核实", dueAt: "2026-11-12T10:00:00+08:00" };
+  const out = await maintain(
+    settings,
+    f.context([{ id: "due-request", source: "owner", type: "task.requested", detail: JSON.stringify(contract) }]),
+    f.io,
+    1000,
+  );
+  const timer = out.later![0];
+  const due = await maintain(settings, f.context([], [], [timer]), f.io, Date.parse(contract.dueAt));
+  assert.ok(due.notice?.[0].text.includes("原承诺保留"));
+  assert.ok(due.notice?.[0].text.includes("规划中"));
+  assert.ok(due.notice?.[0].text.includes("北京时间"));
+  assert.ok(!due.events?.length);
+  const task = [...f.tasks.values()][0];
+  f.io.save({ ...task, status: "deferred" });
+  const deferred = await maintain(settings, f.context([], [], [timer]), f.io, Date.parse(contract.dueAt));
+  assert.ok(!deferred.notice?.length);
+});
+
+test("resuming a deferred contract restores its check or reports the original overdue commitment", async () => {
+  const f = fixture();
+  const settings = { ...config, requests: { source: "owner", type: "task.requested" } };
+  const contract = { goal: "核对", deliverable: "报告", acceptance: "逐项核实", dueAt: "2026-11-12T10:00:00+08:00" };
+  await maintain(
+    settings,
+    f.context([{ id: "resume-check", source: "owner", type: "task.requested", detail: JSON.stringify(contract) }]),
+    f.io,
+    1000,
+  );
+  const task = [...f.tasks.values()][0];
+  await maintain(settings, f.context([f.result(task, "planned", { plan: proposal })]), f.io, 1000);
+  await maintain(settings, f.context([], [f.answer(task, 2)]), f.io, 1000);
+  const manual = { source: "maintenance-sample", type: "run.manual", subject: task.id };
+  const resumed = await maintain(settings, f.context([manual]), f.io, 1000);
+  assert.equal(resumed.later?.[0].at, contract.dueAt);
+  assert.ok(!resumed.events?.length);
+  f.io.save({ ...f.tasks.get(task.id)!, status: "deferred" });
+  const late = await maintain(settings, f.context([manual]), f.io, Date.parse(contract.dueAt) + 1);
+  assert.ok(late.notice?.[0].text.includes("逾期"));
+  assert.ok(!late.events?.length);
+});
