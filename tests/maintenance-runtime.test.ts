@@ -17,6 +17,7 @@ for (const file of ["agent.ts", "flow.ts", "run.ts"])
   copyFileSync(join(import.meta.dirname, "../plugins/maintenance", file), join(home, "plugins/maintenance", file));
 const engine = join(import.meta.dirname, "../plugins/maintenance/run.ts");
 const cli = join(home, "model.mjs");
+const program = process.platform === "win32" ? join(home, "model.cmd") : cli;
 const hook = join(home, "hook.mjs");
 const calls = join(home, "model-calls.jsonl");
 writeFileSync(
@@ -33,6 +34,7 @@ for(const value of [{type:'thread.started',thread_id:session},{type:'turn.starte
 `,
 );
 chmodSync(cli, 0o700);
+if (process.platform === "win32") writeFileSync(program, `@"${process.execPath}" "%~dp0\\model.mjs" %*\r\n`);
 const recoveryFile = join(home, "recovered-fixture");
 writeFileSync(
   hook,
@@ -56,7 +58,7 @@ writeFileSync(
     roles: Object.fromEntries(
       ["plan", "execute", "verify"].map((role) => [
         role,
-        { use: "codex", access: role === "execute" ? "edit" : "read", program: cli },
+        { use: "codex", access: role === "execute" ? "edit" : "read", program },
       ]),
     ),
   }),
