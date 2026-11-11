@@ -22,10 +22,10 @@
 2. 使用 Node.js 24 或更新版本，运行 `npm ci`。一次 PR 解决一个问题，同步更新受影响的中英文说明、示例和配置。
 3. 修 bug 先写能复现它的失败测试，测试文件开头说明防止什么失败。纯文档、模板或小范围可逆改动，不补照着实现抄的测试。
 4. 提交前运行 `npm run test:quick`、`npm run typecheck`、`npm run format:check`。改了 `kernel/`、`protocol/`、`sim/` 时用 `npm test`，它多跑完整模拟和穷举。涉及日志、到期表或并发时，再运行 `npm run test:nightly`。Windows 原生检查用 `npm run test:windows`。各平台的 CI 与安装冒烟检查见 [检查范围](AGENTS.md#怎么改)。
-5. 向 `main` 提交 PR，说明问题、改后的行为、验证结果和兼容影响。未完成的工作使用草稿；合并前确认当前提交的检查通过。请勾选“Allow edits by maintainers”：要调整的地方维护者通常直接在你的分支上改好再合并。Fork 的 CI 跑在 GitHub 的机器上，自动运行；GitHub 新注册账号的首次 PR 要维护者批准后才运行。
+5. 向 `main` 提交 PR，说明问题、改后的行为、验证结果和兼容影响。未完成的工作使用草稿；合并前确认最终提交的 Ubuntu、macOS 和 Windows 检查都已通过，维护者把独立审查和必要的真机验证记在 PR。请勾选“Allow edits by maintainers”：要调整的地方维护者通常直接在你的分支上改好再合并。Fork 的 CI 跑在 GitHub 的机器上，自动运行；GitHub 新注册账号的首次 PR 要维护者批准后才运行。
 
 测试使用临时 `AGENT_AUTOLOOP_HOME`、随机端口、本地假 HTTP 和假通知命令。不要连接真实业务数据库、发送消息，或给已在线的飞书应用再开事件监听。真实交付脚本会创建和删除指定测试仓库，只在用户明确要求时运行。
 
 不要提交密钥、带权限的卡片链接、完整配置、数据库、运行输出或同事资料。问题中的日志和截图也要先脱敏。代码按 [MIT 许可证](LICENSE) 提交。
 
-用户装的是最新的 Release，不是 `main`：合进 `main` 的改动等下一个 Release 才到用户手上，安装和更新方式见 [INSTALL.md](INSTALL.md)，版本号的规则见[协议](docs/protocol.md#版本与兼容)；目前没有长期支持分支。仓库设置中的自动合并保持关闭，交付插件按 [交付协议](docs/protocol.md#交付插件) 完成审查、检查和合并。
+用户装的是最新的 Release，不是 `main`：合进 `main` 的改动等下一个 Release 才到用户手上，安装和更新方式见 [INSTALL.md](INSTALL.md)，版本号的规则见[协议](docs/protocol.md#版本与兼容)；目前没有长期支持分支。本仓库由维护者按上面的流程核对审查和三平台检查，随后合并。

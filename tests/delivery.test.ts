@@ -13,7 +13,11 @@
 // matches the required name, so a passed check waits forever; a PR retargeted during checks is merged into the other branch; a
 // delivery withdrawn during checks leaves its status pending for good; a status write failing right after findings closes the
 // commit to further reviews with nobody told what they found; labels that only partly come off leave a merged PR stuck as failed
-// with no marker for the retry to go by, or leave a review-only PR looking like a full delivery that the retry then merges.
+// with no marker for the retry to go by, or leave a review-only PR looking like a full delivery that the retry then merges;
+// a change merged without a review, by its agent's exemption, is attested as reviewed, or passes as reviewed when a review
+// is asked for while it waits for its check; an out-of-date project toolkit is allowed to merge, an enabled auto-merge
+// survives a failed recheck of that toolkit; a lost auto-merge response triggers a second mutation; a lost branch-update
+// response ignores the already-synchronized head instead of continuing the same handoff.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deliver, fullCheck, waitLive, disableAuto, type DeliveryIO } from "../plugins/delivery/delivery.ts";
@@ -127,6 +131,14 @@ test("review, full check, exact-head attestation, merge, Ship and health all fin
   );
   assert.ok(state.statuses.some((s: any) => s.context === "delivery" && s.state === "success"));
 });
+test("a change exempt from review merges with an attestation that says so", async () => {
+  const { io, state } = fixture();
+  io.review = async () => ({ exempt: "codex" });
+  assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+  const attested = state.statuses.find((s: any) => s.context === "my-review");
+  assert.equal(attested.state, "success");
+  assert.match(attested.description, /codex.*免审/);
+});
 test("a missing label or closed PR launches nothing; forks are refused", async () => {
   for (const change of [{ labels: [] }, { state: "closed" }]) {
     const { io, state } = fixture();
@@ -152,10 +164,17 @@ test("a PR pushed during review gets no attestation and is never merged", async 
 });
 function syncing(io: DeliveryIO, state: any) {
   const api = io.api;
-  io.contains = async (a, b) => a === b || b === `synced-${a}` || (a === "main" && b === "head");
+  const parents = new Map<string, string>();
+  io.contains = async (a, b) => {
+    for (let commit: string | undefined = b; commit; commit = parents.get(commit)) {
+      if (commit === a || commit === `synced-${a}` || (a === "main" && commit === "head")) return true;
+    }
+    return false;
+  };
   io.api = async (path, body, method) => {
     if (path === "pulls/1/update-branch") {
       state.writes.push(path);
+      parents.set(`synced-${state.main}`, state.pr.head.sha);
       state.pr.head.sha = `synced-${state.main}`;
       return {};
     }
@@ -164,6 +183,24 @@ function syncing(io: DeliveryIO, state: any) {
     return api(path, body, method);
   };
 }
+test("a branch-update response lost after acceptance is read back and the new head is reviewed", async () => {
+  const { io, state } = fixture();
+  syncing(io, state);
+  state.pr.head.sha = "behind";
+  const api = io.api;
+  io.api = async (path, body, method) => {
+    const result = await api(path, body, method);
+    if (path === "pulls/1/update-branch") throw new Error("connection lost");
+    return result;
+  };
+  assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+  assert.equal(state.reviewed, 1);
+  assert.deepEqual(
+    state.writes.filter((path: string) => path.endsWith("/update-branch")),
+    ["pulls/1/update-branch"],
+  );
+  assert.equal(latest(state, "my-review").path, "statuses/synced-main");
+});
 test("main advancing after review syncs in the same run and attests only the re-reviewed head", async () => {
   const { io, state } = fixture();
   syncing(io, state);
@@ -259,6 +296,10 @@ test("a PR retargeted during checks is not merged", async () => {
 });
 test("a delivery withdrawn during checks does not leave its status pending", async () => {
   const { io, state } = fixture();
+  const phases: string[] = [];
+  io.report = (phase) => {
+    phases.push(phase);
+  };
   const { api } = io;
   io.api = async (path, body, method) => {
     if (path.startsWith("actions/runs/1/jobs")) state.pr.labels = [];
@@ -270,6 +311,7 @@ test("a delivery withdrawn during checks does not leave its status pending", asy
   assert.equal(last.state, "success");
   assert.match(last.description, /撤回/);
   assert.match(last.description, /未合并/);
+  assert.equal(phases.at(-1), "withdrawn");
   assert.ok(!state.statuses.some((s: any) => s.context === "my-review"));
 });
 test("findings and review-only mode stop before merge", async () => {
@@ -391,6 +433,23 @@ test("review-only added during checks stops before the merge attestation", async
   assert.equal(state.merges, 0);
   assert.ok(!state.statuses.some((s: any) => s.context === "my-review"));
 });
+test("review-only added while an exempt change waits for its check gets it reviewed, not called reviewed", async () => {
+  const { io, state } = fixture();
+  const api = io.api;
+  io.api = async (...args) => {
+    if (args[0].startsWith("actions/workflows/check.yml"))
+      state.pr.labels = [{ name: "deliver" }, { name: "deliver-review" }];
+    return api(...args);
+  };
+  const asked: boolean[] = [];
+  io.review = async (pr) => {
+    asked.push(pr.labels.some((label: any) => label.name === "deliver-review"));
+    return asked.at(-1) ? [] : { exempt: "codex" };
+  };
+  assert.equal((await deliver("example/app", 1, io)).reviewOnly, true);
+  assert.deepEqual(asked, [false, true]);
+  assert.equal(state.merges, 0);
+});
 
 test("a merge response lost after acceptance is read back, never repeated", async () => {
   const { io, state } = fixture();
@@ -401,6 +460,45 @@ test("a merge response lost after acceptance is read back, never repeated", asyn
   };
   assert.equal((await deliver("example/app", 1, io)).merged, "merged");
   assert.equal(state.merges, 1);
+});
+test("auto-merge uses the checked head and reads back a lost response before retrying", async () => {
+  const { io, state } = fixture();
+  const requested: string[] = [];
+  io.enableAuto = async (requestedPR) => {
+    requested.push(requestedPR.head.sha);
+    state.pr.auto_merge = {};
+    throw new Error("connection lost");
+  };
+  io.wait = async () => {
+    state.pr.merged_at = "now";
+    state.pr.merge_commit_sha = "merged";
+  };
+  assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+  assert.deepEqual(requested, ["head"]);
+  assert.equal(state.merges, 0);
+});
+test("a toolkit falling behind while auto-merge waits is refused with auto-merge off", async () => {
+  const { io, state } = fixture();
+  io.enableAuto = async () => {
+    state.pr.auto_merge = {};
+  };
+  io.verifyTools = async () => (state.pr.auto_merge ? "交付工具不是最新版" : null);
+  io.wait = async () => {};
+  await assert.rejects(() => deliver("example/app", 1, io), /不是最新版/);
+  assert.equal(state.pr.auto_merge, null);
+  assert.equal(state.merges, 0);
+});
+test("a release without deployable changes reports both its merge and successful Ship", async () => {
+  const { io, state } = fixture();
+  const reported: any[] = [];
+  io.report = (phase, head, metadata) => {
+    reported.push({ phase, head, ...metadata });
+  };
+  io.live = async () => ({ sha: "live-before", release: "live-before" });
+  io.releaseRequired = async () => false;
+  assert.match((await deliver("example/app", 1, io)).summary, /无需发布/);
+  assert.deepEqual(reported.at(-1), { phase: "docs_only", head: "head", merge: "merged", ship: 1 });
+  assert.equal(latest(state, "delivery").state, "success");
 });
 test("label removal reads back a lost response and does not report a false delivery failure", async () => {
   const { io, state } = fixture();

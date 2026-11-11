@@ -2,15 +2,22 @@
 // here, in protocol/rules.ts.
 export type Access = "read" | "edit" | "full";
 export type Source = { name: string; adapter?: string };
-type AgentOptions = { model?: string; effort?: string; command?: string[]; program?: string; timeout?: number };
-export type Agent = AgentOptions & { name: string; worker: string; use: string; access: Access };
+type AgentOptions = {
+  model?: string;
+  effort?: string;
+  tier?: string;
+  command?: string[];
+  program?: string;
+  timeout?: number;
+};
+export type Agent = AgentOptions & { name: string; worker: string; use: string; access: Access; maxActive?: number };
 export type Channel = { name: string; answerers?: string[]; links?: boolean };
 export type Tell = "always" | "needed" | "never";
 type EventFilter = { source: string; types: string[] };
 type When = EventFilter | { cron: string };
 type RuleWords = { skill?: string; prompt?: string };
-type RuleOptions = RuleWords & { parallel?: number; resume?: boolean; emits?: EventFilter };
-/** Without channels a rule's cards reach every channel; with them, only those. */
+type RuleOptions = RuleWords & { parallel?: number; maxActive?: number; resume?: boolean; emits?: EventFilter };
+/** Without channels a rule's cards reach the default ones, or every channel if there are none; with them, only those. */
 type Reach = { channels?: string[] };
 /** Without parallel a rule's group runs one at a time; with it, each subject is its own thread, that many at once. */
 export type Rule = RuleOptions &
@@ -26,7 +33,14 @@ export type Elsewhere = RuleWords & {
   cwd?: string;
 };
 type Registered = { sources: Record<string, Source>; agents: Record<string, Agent>; channels: Record<string, Channel> };
-export type Rules = Registered & { timezone: string; askFirst: string[]; rules: Rule[]; elsewhere: Elsewhere[] };
+export type Rules = Registered & {
+  timezone: string;
+  askFirst: string[];
+  /** Where a card that names no channels of its own goes: a tell, the hub's own alerts, a rule without a list. */
+  defaultChannels?: string[];
+  rules: Rule[];
+  elsewhere: Elsewhere[];
+};
 
 /** The source of what the clock makes happen. */
 export const SCHEDULE = "schedule";

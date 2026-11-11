@@ -28,6 +28,7 @@ description: 配置 Agent 自动化中台：加规则、接新的事件插件、
 
 - 同一个对象的事件要分开处理、互不等待，就写 `parallel`。一台接单程序同时跑几轮还受 `config.json` 的 `worker.capacity` 限制，默认 2，要多跑就一起调大。
 - 对话这类要马上回的活，不想排在批量的长任务后面：把批量的规则都写进同一个 `group`，`parallel` 写得比 `worker.capacity` 小，留下的名额长任务占不了，对话来了直接领。比如 `capacity` 是 4，批量那组写 `"group": "batch", "parallel": 3`。同一组的规则 `parallel` 写成一样的。
+- 同组一共并行三轮，但单条规则每次只跑一轮时，在规则里加 `"maxActive": 1`。每个对象仍单独排队。在 `agents` 里也可以给单个 Agent 加 `maxActive`，限制它跨规则同时跑几轮。
 - 同一个对象的新事件要接着上一轮的会话（比如同一个对话的后续消息），就写 `"resume": true`；默认每次开新会话。上一轮被停掉、可能还在跑或者换了 Agent 时开新的。不写 `parallel` 时整条规则的事件都接同一个会话。
 - 要停一条规则，用 `agent-autoloop pause <规则> --reason …`（到点自动恢复加 `--until`），恢复用 `resume <规则>`，现在就跑一轮用 `run <规则>`；不用为了停规则去改 `rules.json`。
 - 改规则前可以先写成草稿，用 `agent-autoloop check <草稿>` 校验，不影响正在跑的中台。
@@ -76,7 +77,7 @@ Windows 的 `cwd` 可写 `C:/code/project`、JSON 转义后的 `C:\\code\\projec
 
 一轮最长跑多久写 `timeout`，单位是分钟，默认 180。
 
-ACP 用 `use: "acp"` 和 `command: ["ACP 服务程序"]`，比如 Gemini CLI 是 `["gemini", "--acp"]`、OpenCode 是 `["opencode", "acp"]`，支持 v1 的会话新建、恢复、文字与一次性权限请求；先在该 Agent 自己的 CLI 登录。`access` 只管 Agent 主动来问的操作，规范允许它不询问就执行，要限制得用它自己的模式（比如 `command` 里写 `env INITIAL_AGENT_MODE=read-only …`）；`model`、`effort` 不生效。普通命令接法与实测支持范围见 README。
+ACP 用 `use: "acp"` 和 `command: ["ACP 服务程序"]`，比如 Gemini CLI 是 `["gemini", "--acp"]`、OpenCode 是 `["opencode", "acp"]`，支持 v1 的会话新建、恢复、文字与一次性权限请求；先在该 Agent 自己的 CLI 登录。`access` 只管 Agent 主动来问的操作，规范允许它不询问就执行，要限制得用它自己的模式（比如 `command` 里写 `env INITIAL_AGENT_MODE=read-only …`）；`model`、`effort`、`tier` 不生效，要在 Agent 自己那边设置。普通命令接法与实测支持范围见 README。
 
 DeepSeek Harness 用 `use: "dsh"`，要 0.2.2 或更新（`npm install -g @deepseek-ai/dsh@next --allow-scripts=koffi,node-pty,@deepseek-ai/dsh-subprocess-local`，不放行这三个包的安装脚本，装完一跑就出错），能续接原会话、上报 Token（不报费用），报 `MISSING_CREDENTIAL` 时把密钥放进环境变量，`access` 对应它的权限档位；旧版用 README 里的普通命令接法。没有可打开的桌面链接。
 
@@ -86,7 +87,7 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 
 ## 接一个通道
 
-配置在两处：`rules.json` 的 `channels` 登记（`answerers` 是谁能回答，没写时通道里谁都能回答，`doctor` 会提醒），`config.json` 的 `channels` 写密钥和选项。`agent-autoloop key new channel <名字>` 拿密钥（先问用户）。改了 `config.json` 要 `agent-autoloop service install` 重启。默认每张卡片发到所有通道；某条规则的卡片只想发到某几个通道，在这条规则里写 `"channels": ["feishu"]`。
+配置在两处：`rules.json` 的 `channels` 登记（`answerers` 是谁能回答，没写时通道里谁都能回答，`doctor` 会提醒），`config.json` 的 `channels` 写密钥和选项。`agent-autoloop key new channel <名字>` 拿密钥（先问用户）。改了 `config.json` 要 `agent-autoloop service install` 重启。默认每张卡片发到所有通道；某条规则的卡片只想发到某几个通道，在这条规则里写 `"channels": ["feishu"]`；通道多了，`tell`、中台自己的告警这些不属于哪条规则的卡片会每个通道各发一遍，在 `rules.json` 顶层写 `"defaultChannels": ["feishu"]`，自己没写 `channels` 的都只发那几个。
 
 **桌面通知**：新装的中台默认开着（`plugins/desktop/channel.ts`），两处各有一个 `desktop`。卡片第一次发送时，macOS 用 `osascript`、Linux 用 `notify-send`、Windows 用 PowerShell 系统托盘通知弹一条通知，标题为“Agent 问你一个问题”，正文是卡片标题和“运行 agent-autoloop status 查看”，不能在通知上回答。没有图形会话时安静跳过，问题仍在；通知命令失败时报告失败，不会让中台退出。接了别的通道可以留着它；不想要就把两处的 `desktop` 都删掉，再重启。以前装的中台不会自动加上它。
 
@@ -130,7 +131,33 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 }
 ```
 
+多个项目共用规则时，在接单命令后加 `--review-policy owner/config:ops/review-policy.json`。插件从这个仓库的 main 读取文件。`reviewers` 按名字给出模型（字符串简写）或 `{ "model": "…", "effort": "xhigh" }`，`default` 是默认审查器名称列表，`agents` 给每种开发 Agent 写列表，空列表免审，同名写两次独立审查两次。`trusted_submitters` 列出可以登记来源的 GitHub 数字账号。深审路径和显式只审查都可覆盖免审。已有分支规则指定审查状态时，用 `--review-status` 传它的名字。
+
 `AGENTS.md` 要有 `## 审查要点`。`review.command` 可用命令数组替换审查程序：提示词从标准输入读，`{input}` 替换成文字差异文件，标准输出必须是 `{"findings":[{"title":"文件:行号和问题","text":"触发条件和后果"}]}`；没问题交空列表。默认 Codex 忽略用户配置、禁用记忆，只读单独的审查快照。`admin_merge` 默认为空；只有 main 明确列出的 PR 作者才能使用管理员合并。没有线上服务的项目可以省略 `health`，回执会明确写只完成合并。
+
+要按写代码的 Agent 定审查，在 `review` 里加 `agents` 和 `trusted`：
+
+```json
+"review": {
+  "points": "AGENTS.md",
+  "trusted": [12345678],
+  "agents": {
+    "codex": null,
+    "claude": { "model": "gpt-6.1-sol", "effort": "xhigh" },
+    "gemini": { "command": ["/绝对路径/reviewer", "{input}"] }
+  }
+}
+```
+
+`agents` 给每个 Agent 写一个审查器：`null` 是免审；`model`、`effort` 是内置 Codex 审查用的模型和推理深度，没写的那项用默认（`gpt-6.1-sol`、`high`）；`command` 换成一条命令，约定同 `review.command`。没列出的 Agent 和没声明来源的改动走默认审查，也就是 `review.command`，没写就是内置 Codex。免审的改动碰到 `xhigh` 的路径或打了 `deliver-review`，照样走默认审查；内置 Codex 在 `xhigh` 的路径上深度不低于 `xhigh`。
+
+来源用提交状态声明。整份改动都是同一个 Agent 写的，才在要交付的提交上写这一条，说明里填 Agent 名字（小写字母开头，只用小写字母、数字和 `-`）：
+
+```bash
+gh api repos/owner/app/statuses/<完整提交编号> -f context=delivery-agent/<PR 编号> -f state=success -f description=claude
+```
+
+只认 `trusted` 里的 GitHub 账号写的状态，填账号的数字 ID（`gh api user --jq .id`）。声明跟着提交走：再推提交要重新声明，没声明就走默认审查；同步 main 产生的干净合并沿用原来的声明。要撤回，在同一个提交上再写一条 `state=failure` 的同名状态。PR 说明、标签和分支名都不算声明。
 
 `check.job` 写 job 的名字；矩阵 job（名字像 `check (ubuntu-latest)`）算同一个 job，每一项都要成功。检查工作流的触发类型要带 `ready_for_review`：草稿转 ready 后，只接受这之后新跑的一次检查，而 `pull_request` 默认不在转 ready 时触发。写成 `on: { pull_request: { types: [opened, synchronize, reopened, ready_for_review] } }`。
 
@@ -174,6 +201,17 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 
 合并后发布失败时，修复发布后重新跟进原 PR 的 Ship 和健康检查。
 
+把这套流程接到已有 GitHub 交付命令时，可以在可信规则中给 `delivery` 的 `command` 加这些参数。
+
+- `--auto-merge` 在完整检查和审查都通过后，为当前提交开启 GitHub 的 squash 自动合并。项目设置中的管理员合并名单仍走现有管理员权限。
+- `--toolkit owner/name` 在合并前核对项目装入的 `ops/delivery/` 与该工具仓库 main 一致。工具仓库自己使用源码。
+- `--progress-command /绝对路径/程序` 从标准输入收一条阶段快照，包括 `repo`、`number`、`head`、`phase`、`at`，已知时带 `merge`、`ship`、`detail`。展示失败不影响 GitHub 回执。
+- `--notify-command /绝对路径/程序` 从标准输入收 `{ "key": "…", "text": "…" }`。程序用 `key` 去重，在成功接收后返回零。这个模式把无人等的退回和 `ask-owner` 转告交给该程序，并用中台复查每分钟重试暂时的 GitHub 或执行错误。
+
+对应的轮询命令用 `poll.ts --dispatch owner/app owner/another`。规则按 `delivery.owner.app.pr`、`delivery.owner.app.issue` 和 `delivery.owner.app.unacknowledged` 路由给固定的仓库，其中最后一种在有等待标记的退回三分钟无人领取时触发。同组设置 `parallel` 控制总体并发，每个项目规则用 `maxActive: 1`。
+
+中台停机时，可以在原接单机器上先确认同一项目的交付已停稳，再用可信安装目录的 `node plugins/delivery/run.ts owner/app --pr 123` 加原规则中的审查和合并参数，处理已打 `deliver` 的 PR。它直接读 GitHub 当前状态并使用相同检查。中台不可达时省略通知和看板命令。手动交付期间保持自动派单暂停，完毕后再恢复接单。
+
 项目 Ship 只在 main 的 push 上运行，检出完整历史（checkout 的 `fetch-depth: 0`），然后调用这个仓库的 Action。把下面的占位提交换成发布后核实的完整 SHA：
 
 ```yaml
@@ -212,7 +250,7 @@ Windows 用任务计划程序在本人登录后启动；通过 SSH 管理时仍�
 
 接插件先在专用测试中台验证：`agent-autoloop conformance <地址> --config <测试凭据文件>`。文件里的 `keys` 分别放来源、接单程序、通道、本人密钥；`eventType` 匹配测试规则，`answerer` 在测试通道的允许名单内。检查会写事件和卡片，不指向正在用的中台。协议类型在 `protocol/schema.json`。
 
-`agent-autoloop why 42` 查一轮的事件、规则和回执；`GET /v1/stream?after=42` 供本人客户端按序号续读。备份用 `agent-autoloop backup [目录]`，中台运行时也能做；恢复用 `agent-autoloop restore <目录>`，要先停中台。手工备份要一起保留 `hub.db` 和权限为 0600 的 `master.key`；后者推导轮次和卡片链接的 token。
+`agent-autoloop runs [规则] [--before <第几轮>]` 列出更早做完的轮次和编号，`agent-autoloop why 42` 查一轮的事件、规则和回执；`GET /v1/stream?after=42` 供本人客户端按序号续读。备份用 `agent-autoloop backup [目录]`，中台运行时也能做；恢复用 `agent-autoloop restore <目录>`，要先停中台。手工备份要一起保留 `hub.db` 和权限为 0600 的 `master.key`；后者推导轮次和卡片链接的 token。
 
 ## 版本与卸载
 
