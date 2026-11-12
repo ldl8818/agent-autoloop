@@ -1,9 +1,11 @@
 // Failure modes: approval is reused for a changed plan; a repeated answer executes twice; a deferred task wakes itself;
 // a stage result completes another task; the author's success claim bypasses independent checks; an unknown execution
-// is blindly restarted; event prose supplies a command, directory or agent; old answers resume the wrong stage.
+// is blindly restarted; event prose supplies a command, directory or agent; old answers resume the wrong stage;
+// an approval card hides the decision under a full implementation plan or loses its complete evidence.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { maintain, rules, type Settings, type Task } from "../plugins/maintenance/flow.ts";
+import { parseResult } from "../protocol/validate.ts";
 
 const config: Settings = {
   id: "sample",
@@ -76,6 +78,47 @@ function fixture() {
   });
   return { tasks, calls, io, context, start, result, plan, answer };
 }
+
+test("a brief approval preserves the full plan and the stable recovery marker", async () => {
+  const f = fixture();
+  const { task } = await f.start();
+  const summary = "修正等待误报，仅改判定与回归，不重跑正式业务。";
+  const out = await maintain(
+    config,
+    f.context([f.result(task, "planned", { plan: { ...proposal, summary } })]),
+    f.io,
+    1000,
+  );
+  const [brief, details] = out.ask![0].text.split("\n\n## 详情\n");
+  assert.match(brief, /等待你决定/);
+  assert.ok(brief.includes(summary));
+  assert.ok(!brief.includes(proposal.rollback));
+  for (const value of Object.values(proposal).slice(1)) assert.ok(details.includes(value));
+  assert.ok(details.endsWith(`维护单：${task.id}`));
+  assert.equal(out.ask![0].about, `maintenance:${task.id}:1`);
+});
+
+test("a valid long owner goal can register and dispatch through the receipt boundary", async () => {
+  const f = fixture();
+  const goal = "核实业务状态并给出可执行方案。".repeat(30);
+  const settings = { ...config, requests: { source: "owner", type: "task.requested" } };
+  const out = await maintain(
+    settings,
+    f.context([
+      {
+        source: "owner",
+        id: "long-goal",
+        type: "task.requested",
+        detail: JSON.stringify({ goal, deliverable: "修复提交", acceptance: "独立验收" }),
+      },
+    ]),
+    f.io,
+    1000,
+  );
+  const receipt = parseResult({ outcome: "done", ...out });
+  assert.equal(receipt.events?.[0].type, "maintenance.plan");
+  assert.ok(receipt.notice?.[0].text.includes(goal));
+});
 
 test("the complete chain dispatches independent execution and verification before closing", async () => {
   const f = fixture();
@@ -385,6 +428,33 @@ test("a contracted delivery needs independent evidence before acceptance", async
   assert.ok(!f.calls.includes("accept"));
 });
 
+test("an approval card explains that this plan waits for a decision", async () => {
+  const f = fixture();
+  const { task } = await f.start();
+  const out = await maintain(config, f.context([f.result(task, "planned", { plan: proposal })]), f.io, 1000);
+  assert.ok(out.ask?.[0].text.startsWith("当前状态：等待你决定"));
+  assert.ok(out.ask?.[0].text.includes("不点击会继续等待"));
+  assert.ok(!out.events?.some((event: any) => event.type === "maintenance.execute"));
+});
+
+test("a verifier rejection keeps its actual reason even without acceptance evidence", async () => {
+  const f = fixture();
+  const task = await f.plan();
+  task.contract = { goal: "修复", deliverable: "提交", acceptance: "原失败恢复", completion: "delivery" };
+  f.io.save(task);
+  await maintain(config, f.context([], [f.answer(task, 0)]), f.io, 1000);
+  await maintain(config, f.context([f.result(task, "executed", { result: { ok: true } })]), f.io, 1000);
+  const out = await maintain(
+    config,
+    f.context([f.result(task, "verified", { result: { ok: false, summary: "原解析错误仍可复现" } })]),
+    f.io,
+    1000,
+  );
+  assert.equal(f.tasks.get(task.id)!.status, "blocked");
+  assert.ok(out.ask?.[0].text.includes("原解析错误仍可复现"));
+  assert.ok(!f.calls.includes("accept"));
+});
+
 test("delivery and original business recovery remain separate until evidence arrives", async () => {
   const f = fixture();
   const task = await f.plan();
@@ -392,17 +462,22 @@ test("delivery and original business recovery remain separate until evidence arr
   f.io.save(task);
   await maintain(config, f.context([], [f.answer(task, 0)]), f.io, 1000);
   await maintain(config, f.context([f.result(task, "executed", { result: { ok: true } })]), f.io, 1000);
-  await maintain(
+  const report = await maintain(
     config,
     f.context([
       f.result(task, "verified", {
-        result: { ok: true, evidence: { version: "commit-1", location: "/evidence", environment: "isolated" } },
+        result: {
+          ok: true,
+          summary: "源码检查通过。".repeat(40),
+          evidence: { version: "commit-1", location: "/evidence", environment: "isolated" },
+        },
       }),
     ]),
     f.io,
     1000,
   );
   assert.equal(f.tasks.get(task.id)!.status, "observing");
+  assert.match(report.notice![0].text.split("\n")[0], /等待业务效果.*尚未核实/);
   f.io.hook = async (): Promise<any> => ({ status: "resolved", message: "原业务已恢复" });
   await maintain(config, f.context([f.result(task, "recheck", {})]), f.io, 1000);
   assert.equal(f.tasks.get(task.id)!.status, "done");

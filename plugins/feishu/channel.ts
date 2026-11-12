@@ -26,9 +26,62 @@ function outcomeOf(card: Card) {
   return card.state === "closed" && card.result ? card.result : null;
 }
 
+/** Labels are display-only; the rule and card number still determine where an answer goes. */
+function projectName(card: Card, projects: Record<string, string>) {
+  // /tell without a rule uses the configured source/task name as its title.
+  const origin = card.rule ?? card.title;
+  const match = Object.entries(projects)
+    .filter(([prefix, name]) => prefix && typeof name === "string" && name.trim() && origin.startsWith(prefix))
+    .sort(([a], [b]) => b.length - a.length)[0];
+  return match?.[1].trim() || card.rule || "中台";
+}
+
+function contentOf(card: Card, settled: boolean, title: string) {
+  if (!card.text && title === card.title) return [];
+  const marker = "\n\n## 详情\n";
+  const at = card.text.indexOf(marker);
+  const lead = at < 0 ? card.text : card.text.slice(0, at);
+  const long = lead.length > 200;
+  const preview = long ? Array.from(lead.split("\n")[0]).slice(0, 180).join("") : lead;
+  const original = settled || long ? card.text : at < 0 ? "" : card.text.slice(at + marker.length);
+  const details = (title !== card.title ? `${card.title}\n\n` : "") + original;
+  return [
+    ...(!settled && preview
+      ? [long ? { tag: "div", text: { tag: "plain_text", content: preview } } : { tag: "markdown", content: preview }]
+      : []),
+    ...(details
+      ? [
+          {
+            tag: "collapsible_panel",
+            expanded: false,
+            header: { title: { tag: "plain_text", content: settled ? "查看原始内容" : "查看详情" } },
+            elements: [{ tag: "markdown", content: details }],
+          },
+        ]
+      : []),
+  ];
+}
+
 /** One card, as it looks now: the options while it's open, what became of it after. */
-export function render(card: Card) {
+export function render(card: Card, projects: Record<string, string> = {}) {
   const outcome = outcomeOf(card);
+  const title = Array.from(card.title.replace(/^主人[，,：:]\s*/u, "").split("\n")[0])
+    .slice(0, 36)
+    .join("");
+  const status =
+    card.state === "open"
+      ? card.kind === "ask"
+        ? "等待决定"
+        : "待处理"
+      : card.state === "decided"
+        ? "等待处理"
+        : card.state === "done"
+          ? "已执行"
+          : card.kind === "ask"
+            ? "已结束"
+            : card.result
+              ? "已结案"
+              : "进度通知";
   // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
   const option = (label: string, index: number) => ({
     tag: "interactive_container",
@@ -103,15 +156,18 @@ export function render(card: Card) {
     schema: "2.0",
     config: { update_multi: true, enable_forward: false },
     header: {
-      title: { tag: "plain_text", content: card.title },
+      title: { tag: "plain_text", content: `${projectName(card, projects)}｜${title}｜${status}` },
       template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
     },
     body: {
       elements: [
-        ...(card.text ? [{ tag: "markdown", content: card.text }] : []),
+        ...afterwards,
+        ...noteSaid,
+        ...contentOf(card, !!outcome, title),
         ...(card.state === "open"
           ? [...(notice ? [textForm] : []), ...card.options.map(option), ...(notice ? [] : [textForm])]
-          : [...afterwards, ...noteSaid]),
+          : []),
+        { tag: "div", text: { tag: "plain_text", content: `卡片 #${card.id}` } },
       ],
     },
   };
@@ -161,7 +217,15 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
       }
       if (!card) continue;
       try {
-        const content = JSON.stringify(render(card));
+        const projects = options.projects;
+        const content = JSON.stringify(
+          render(
+            card,
+            projects && typeof projects === "object" && !Array.isArray(projects)
+              ? (projects as Record<string, string>)
+              : {},
+          ),
+        );
         let ref = card.ref;
         if (ref) {
           try {

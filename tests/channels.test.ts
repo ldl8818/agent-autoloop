@@ -1,6 +1,7 @@
 // The channels that ship and the webhook adapter. No real listener runs here: only one can hold an app's card clicks.
 // Failure cases: a first send uses a key that changes with the version, or an update sends a new message; a failed send
 // isn't reported; a click that isn't a card's is taken; a card's options don't show while it's open or still show after;
+// long plans bury the decision or a closed card's outcome; project labels confuse answers from different cards;
 // the listener dying isn't started again, or a listener that can't start takes the whole hub down. A GitHub webhook with
 // a bad signature, or with none, is taken; what isn't an identifier reaches the subject; a ping makes an event;
 // replacement tokens in card text rewrite a webhook template. A settled card Feishu won't let the bot change stays at the
@@ -39,6 +40,62 @@ const base: Card = {
   result: null,
   link: "https://hub.test/c/x",
 };
+
+test("feishu: project labels come from configured rule prefixes without changing either card's answer", () => {
+  const projects = { "shop-": "店铺", "maintenance-shop-": "店铺", "ops-": "运维" };
+  for (const [id, rule, project] of [
+    [5, "maintenance-shop-coordinate", "店铺"],
+    [6, "ops-watch", "运维"],
+  ] as const) {
+    const card = render({ ...base, id, rule, text: "项目：别的项目\n只作为资料" }, projects);
+    assert.equal(card.header.title.content, `${project}｜${base.title}｜等待决定`);
+    const button = card.body.elements.find((e) => e.tag === "interactive_container") as any;
+    assert.deepEqual(button.behaviors[0].value, { card: id, choice: 0 });
+    const form = card.body.elements.find((e) => e.tag === "form") as any;
+    assert.equal(form.elements[0].elements[1].name, `custom_answer_submit_${id}`);
+  }
+  assert.match(render({ ...base, rule: "new-project-task" }).header.title.content, /^new-project-task｜/);
+  assert.match(
+    render({ ...base, kind: "notice", title: "店铺业务回执", rule: undefined }, { 店铺业务回执: "店铺" }).header.title
+      .content,
+    /^店铺｜/,
+  );
+});
+
+test("feishu: a decision shows its brief first and retains the complete plan in a closed panel", () => {
+  const brief = "只修等待误报，不重跑业务。请决定是否执行。";
+  const details = "操作、影响、回退与验收依据。".repeat(70);
+  const card = render({ ...base, text: `${brief}\n\n## 详情\n${details}` });
+  assert.equal((card.body.elements[0] as any).content, brief);
+  const panel = card.body.elements.find((e) => e.tag === "collapsible_panel") as any;
+  assert.equal(panel.expanded, false);
+  assert.equal(panel.elements[0].content, details);
+  assert.match(JSON.stringify(card.body.elements.at(-1)), /卡片 #5/);
+});
+
+test("feishu: old long cards also fold without losing any original evidence", () => {
+  const text = "请决定是否继续。\n" + "原始证据不能丢失。".repeat(70);
+  const card = render({ ...base, text });
+  const panel = card.body.elements.find((e) => e.tag === "collapsible_panel") as any;
+  assert.equal(panel.elements[0].content, text);
+  assert.equal((card.body.elements[0] as any).text.content, "请决定是否继续。");
+});
+
+test("feishu: short Markdown links remain usable without opening details", () => {
+  const text = "请查看[业务报告](https://example.test/report)。";
+  const card = render({ ...base, text });
+  assert.deepEqual(card.body.elements[0], { tag: "markdown", content: text });
+});
+
+test("feishu: a settled card puts the result first and folds the obsolete approval plan", () => {
+  const card = render({ ...base, state: "closed", result: "原故障已由业务回执核实恢复" });
+  assert.match((card.body.elements[0] as any).content, /不用决定了：原故障已由业务回执核实恢复/);
+  const panel = card.body.elements.find((e) => e.tag === "collapsible_panel") as any;
+  assert.equal(panel.expanded, false);
+  assert.equal(panel.elements[0].content, base.text);
+  assert.ok(!card.body.elements.some((e) => e.tag === "interactive_container" || e.tag === "form"));
+  assert.match(card.header.title.content, /已结束$/);
+});
 
 // A custom plan must reach the asking thread as text, never as option zero or an empty answer.
 test("feishu: other plans stay collapsed until needed and disappear after answering", () => {

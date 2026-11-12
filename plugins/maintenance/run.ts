@@ -161,7 +161,7 @@ export async function stage(s: Settings, role: Role, task: Task, turn: Partial<T
     (material.prompt ?? "") +
     "\n" +
     (role === "plan"
-      ? "只读诊断，给出可实际执行的具体方案，逐条回应任务契约，不更改约定的交付物与完成标准。最后仅输出 JSON，包含 title、steps、impact、rollback、acceptance 五个非空字符串，title最多120字，其余各600字。"
+      ? "只读诊断，给出可实际执行的具体方案，逐条回应任务契约，不更改约定的交付物与完成标准。最后仅输出 JSON，包含 title、summary、steps、impact、rollback、acceptance 六个非空字符串。title只写简短事项名，不写称呼、项目或状态，最多36字；summary最多120字，只讲拟做什么、关键影响和需要本人决定什么，不写路径或日志。其余四项各最多600字，保留完整操作、影响、恢复办法和验收标准。"
       : role === "verify"
         ? '独立核对批准方案和当前证据，不采信作者自述，不修改候选。最后仅输出 JSON：{"ok":true或false,"summary":"实际证据和未解决缺口"}。'
         : "只执行批准范围；先核对现状，结果未知时复查，不重复有副作用的操作。需要新增决定时立即结束并说明缺口。");

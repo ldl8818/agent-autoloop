@@ -101,6 +101,7 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 ```
 
 同一个飞书应用的卡片点击只能有一个监听，只在一台电脑上跑。
+多项目的名称映射、摘要与折叠详情见[飞书卡片展示](../../docs/protocol.md#飞书卡片展示)。项目标签只影响显示，回答仍按原卡片编号核对，不按正文猜项目。
 决定卡保留原选项，并在“其他方案：我来说明”中接收自由文字；用户检查输入或语音转文字后点“按我的说明继续”。通道只提交 text，不附带 choice；通知的可选处理说明仍使用原结案入口。自由文字不会改变规则给定的 Agent、目录或权限。
 
 **只会发文字的（钉钉、企微的群机器人，Slack、Discord 的 Webhook）**：用 `plugins/webhook/channel.ts`，`config.json` 的通道项写 `"use": "webhook"`、`"platform": "dingtalk"` 和 `"url": "已有的 Webhook 地址"`；平台也可选 `wecom`、`slack`、`discord`。别的平台只要收 JSON POST 也能接：不写 `platform`，写 `url` 和带 `{text}` 的 `body`，比如 Telegram 写 `"url": "https://api.telegram.org/bot<机器人令牌>/sendMessage"`、`"body": { "chat_id": "…", "text": "{text}" }`。`rules.json` 里写 `"links": true`，卡片链接本身就能回答；`config.json` 的 `hub.publicUrl` 要配成手机或电脑能打开的地址。

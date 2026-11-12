@@ -187,7 +187,8 @@ export function validPlan(plan: any) {
     plan &&
     typeof plan === "object" &&
     !Array.isArray(plan) &&
-    Object.keys(plan).length === 5 &&
+    Object.keys(plan).length === ("summary" in plan ? 6 : 5) &&
+    (!("summary" in plan) || (typeof plan.summary === "string" && plan.summary.trim() && plan.summary.length <= 120)) &&
     ["title", "steps", "impact", "rollback", "acceptance"].every(
       (key) => typeof plan[key] === "string" && plan[key].trim() && plan[key].length <= (key === "title" ? 120 : 600),
     )
@@ -199,7 +200,14 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
   const output: Receipt = {};
   const append = (kind: keyof Receipt, value: any) => (output[kind] ??= []).push(value);
   const notify = (t: Task, text: string, kind = "status") =>
-    append("notice", { title: "任务进度", text, key: `${t.id}:${t.revision}:${t.status}:${kind}`, fyi: true });
+    append("notice", {
+      title: Array.from(t.plan?.title ?? t.contract?.goal ?? "任务进度")
+        .slice(0, 120)
+        .join(""),
+      text: t.status === "observing" ? `当前状态：等待业务效果，原业务恢复尚未核实。\n${text}` : text,
+      key: `${t.id}:${t.revision}:${t.status}:${kind}`,
+      fyi: true,
+    });
   const cancelTimer = (t: Task) => {
     append("later", { key: timerKey(t), cancel: true });
     if (t.contract?.dueAt) append("later", { key: checkKey(t), cancel: true });
@@ -226,6 +234,16 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       title: plan?.title ?? "维护需要补充条件",
       key: `${t.id}:${t.revision}:${t.status}`,
       text:
+        (t.status === "approval"
+          ? "当前状态：等待你决定，尚未执行。选择后才开始；不点击会继续等待。\n"
+          : t.status === "blocked"
+            ? "当前状态：本轮已结束，但任务未完成。请决定如何接续，不会自行重做。\n"
+            : "") +
+        (message || t.status === "blocked"
+          ? (message ?? t.blockedMessage ?? "请恢复本阶段的具体前置条件后继续。").slice(0, 140)
+          : (plan.summary ??
+            `拟做：${plan.steps.split(/[。；\n]/u)[0].slice(0, 60)}\n影响：${plan.impact.split(/[。；\n]/u)[0].slice(0, 60)}`)) +
+        "\n\n## 详情\n" +
         (t.contract
           ? `目标：${t.contract.goal.slice(0, 400)}\n交付物：${t.contract.deliverable.slice(0, 300)}\n`
           : "") +
@@ -416,7 +434,10 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
           ? await io.hook("accept", t)
           : {
               ok: false,
-              summary: supported ? data.result?.summary : "独立验收缺少当前版本、证据位置和执行环境，未结案。",
+              summary:
+                data.result?.ok !== true || supported
+                  ? data.result?.summary
+                  : "独立验收缺少当前版本、证据位置和执行环境，未结案。",
             };
       if (accepted.ok === true) {
         if (t.contract) t.handoff = { ...t.handoff, verified: new Date(now).toISOString() };

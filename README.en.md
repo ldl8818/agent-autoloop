@@ -165,6 +165,8 @@ Built-in plugins ship with the program and are enabled through configuration. Us
 
 Feishu decision cards also offer an expandable custom-plan input. Submit your own instructions to resume the asking task with your literal text; keyboard dictation can supply the text before you review and submit it. Blank input does not answer a card, and only the first answer takes effect.
 
+Cards in a shared Feishu chat identify the project, task and state, show the brief or outcome first, and fold the full evidence. See [Feishu card display](docs/protocol.md#飞书卡片展示) for project labels and compatibility with existing cards.
+
 **What has been tested:** Claude Code, Codex, and ACP (with the official Codex ACP adapter) have run multi-turn Q&A and session resumption across processes. Feishu has run real delivery, button callbacks, and card updates. The four webhook templates have only been checked against local mock servers, and the GitLab webhook against the payloads in its docs, not a real GitLab. These text channels answer through a link, so `hub.publicUrl` must be reachable from your phone or computer.
 
 **Built-in agents through another service.** To send Claude Code or Codex to a third-party model service, or to set environment variables before it starts, write a small script that sets them and starts the program, then put `"program": "/path/to/script"` on the agent. Session resumption and usage reporting still work. See the [guide](skills/agent-autoloop/SKILL.md#接一个-agent).
