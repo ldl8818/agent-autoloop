@@ -273,7 +273,9 @@ test("Codex: access, new and going on", { skip: !stubbed(codex, {}) }, () => {
   assert.ok(argv.includes('approval_policy="never"'));
   assert.ok(stubbed(codex, { access: "read" })!.includes('sandbox_mode="read-only"'));
   assert.ok(stubbed(codex, { access: "full" })!.includes('sandbox_mode="danger-full-access"'));
-  const again = stubbed(codex, { resume: "thread-1", model: "m", effort: "xhigh", tier: "priority" })!;
+  const wrapped = stubbed(codex, { resume: "thread-1", model: "m", effort: "xhigh", tier: "priority" })!;
+  assert.ok(wrapped.some((part) => part.endsWith("resume.ts")));
+  const again = JSON.parse(wrapped.at(-1)!).argv as string[];
   assert.deepEqual(again.slice(1, 3), ["exec", "resume"]);
   assert.equal(again.at(-2), "thread-1");
   assert.equal(again.at(-1), argv.at(-1));
@@ -286,7 +288,8 @@ test("Codex: access, new and going on", { skip: !stubbed(codex, {}) }, () => {
 
 test("Codex: new and resumed runs use only browser access configured for the background task", () => {
   for (const resume of [null, "thread-1"]) {
-    const prompt = codex.command({ ...turn, resume }).at(-1)!;
+    const command = codex.command({ ...turn, resume });
+    const prompt = resume ? JSON.parse(command.at(-1)!).argv.at(-1) : command.at(-1)!;
     assert.match(prompt, /后台 codex exec/);
     assert.match(prompt, /本轮实际可用的浏览器工具/);
     assert.match(prompt, /规则或 Skill.*浏览器入口/);

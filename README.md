@@ -163,6 +163,8 @@ Agent 结束了这一轮，问了你一个问题。它现在不占进程、不�
 
 多个项目共用飞书会话时，卡片按“项目｜事项｜状态”标明归属，先显示摘要或处理结果，完整依据默认折叠。项目名称配置和旧卡片兼容见[飞书卡片展示](docs/protocol.md#飞书卡片展示)。
 
+macOS／Linux 上，Codex 的桌面会话被保持载入时，也能接回原编号；忙碌时自动等到空闲再继续，见[原会话续接](docs/plugins.md#codex-原会话续接)。
+
 **实测情况：** Claude Code、Codex 和 ACP（官方 Codex ACP 适配器）跑通了多轮问答和跨进程会话续接；ZCode 跑通了提问、回答后接回原会话；飞书跑通了发送、按钮回调和卡片更新；四种 Webhook 模板只在本地模拟服务上验证过，GitLab Webhook 按官方文档的格式测试，没连过真实 GitLab。这些文字通道靠回答链接拍板，要把 `hub.publicUrl` 配成手机或电脑能打开的地址。
 
 **内置 Agent 走第三方网关。** Claude Code、Codex 要接第三方模型服务，或者启动前要先设好环境变量，写一个设好变量再启动它的小脚本，在 Agent 里写 `"program": "脚本路径"`，会话续接和用量统计照旧，见[说明](skills/agent-autoloop/SKILL.md#接一个-agent)。

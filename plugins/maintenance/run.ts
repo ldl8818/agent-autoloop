@@ -104,9 +104,9 @@ async function delegate(
   const { commandLine } = await import(pathToFileURL(resolve(dirname(engine), "../host/command.ts")).href);
   const configured = s.roles[role];
   const adapter: Adapter = await adapterFor(configured.use);
-  const native = adapter.command({ ...turn, ...configured, cwd, prompt } as Turn);
   // Personal lifecycle hooks can replace a final answer; stage results must belong to this task alone.
-  if (configured.use === "codex") native.splice(1, 0, "-c", "features.hooks=false", "-c", "features.memories=false");
+  const startup = configured.use === "codex" ? ["-c", "features.hooks=false", "-c", "features.memories=false"] : [];
+  const native = adapter.command({ ...turn, ...configured, cwd, prompt } as Turn, startup);
   const [program, argv] = commandLine(native);
   const environment = { ...process.env };
   return await new Promise<Reading>((yes, no) => {

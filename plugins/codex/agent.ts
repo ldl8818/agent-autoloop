@@ -1,7 +1,9 @@
 // Codex: the user's own, installed and signed in by them. A run is a `codex exec` in the background; its thread is kept
 // on disk, so a retry or an answer can go on in it, and the link opens it in the app.
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { commandLine, powershell, psQuote } from "../../host/command.ts";
+import { stablePath } from "../../host/node-path.ts";
 import { findProgram, tail, type Adapter } from "../../worker/agents.ts";
 
 const SANDBOX = { read: "read-only", edit: "workspace-write", full: "danger-full-access" };
@@ -10,8 +12,8 @@ export const IN_THE_APP = [
   "/Applications/Codex.app/Contents/Resources/codex",
 ];
 
-export default {
-  command: (turn) => {
+const adapter: Adapter = {
+  command: (turn, startup = []) => {
     // The elevated Windows sandbox runs as CodexSandboxUsers. Share only the supplied data, never the run token or key.
     if (process.platform === "win32" && turn.contextFile)
       powershell(`
@@ -22,8 +24,9 @@ export default {
       $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'Read', 'Allow'))
       [IO.File]::SetAccessControl($file, $acl)
     `);
-    return [
+    const argv = [
       turn.program ?? findProgram("codex", () => IN_THE_APP),
+      ...startup,
       "exec",
       ...(turn.resume ? ["resume"] : []),
       "--json",
@@ -43,7 +46,16 @@ export default {
         "沿用该入口的会话，只交网页步骤，业务处理和中台回执仍由本轮负责；没有可用入口或需要本人恢复连接时，按待你处理的约定交回。\n\n" +
         turn.prompt,
     ];
+    return turn.resume
+      ? [
+          stablePath(process.execPath),
+          "--disable-warning=ExperimentalWarning",
+          join(import.meta.dirname, "resume.ts"),
+          JSON.stringify({ turn, argv, shared: startup.length === 0 && process.platform !== "win32" }),
+        ]
+      : argv;
   },
+  cancel: (turn) => adapter.command({ ...turn, resume: turn.resume ?? turn.session, cancel: true }),
   read(stdout, code, stderr) {
     const seen: {
       text?: string;
@@ -53,6 +65,7 @@ export default {
       finished?: boolean;
       started?: boolean;
       completed?: boolean;
+      external?: boolean;
     } = {};
     for (const line of stdout.split("\n")) {
       let event: any;
@@ -63,7 +76,12 @@ export default {
       }
       // A login shell's profile prints here too, and `null` is valid JSON.
       if (!event) continue;
-      if (event.type === "thread.started") seen.session = event.thread_id;
+      // Like ACP, a resumed conversation may already contain work: a failed connection must preserve it.
+      if (event.type === "autoloop.resume") {
+        seen.session = event.thread_id;
+        seen.started = true;
+      } else if (event.type === "autoloop.external") seen.external = event.active;
+      else if (event.type === "thread.started") seen.session = event.thread_id;
       else if (event.type === "turn.started") seen.started = true;
       else if (event.type === "item.completed" && event.item?.type === "agent_message") seen.text = event.item.text;
       else if (event.type === "turn.completed") {
@@ -71,8 +89,10 @@ export default {
         // A reconnect is announced as an error event and then got over — it fell back to another transport and carried
         // on — so it isn't how the turn ended. A finished run was redone twelve times over one of these.
         delete seen.error;
-        const { input_tokens = 0, output_tokens = 0, cached_input_tokens = 0 } = event.usage ?? {};
-        seen.sessionUsage = { input: input_tokens, output: output_tokens, cached: cached_input_tokens };
+        if (event.usage) {
+          const { input_tokens = 0, output_tokens = 0, cached_input_tokens = 0 } = event.usage;
+          seen.sessionUsage = { input: input_tokens, output: output_tokens, cached: cached_input_tokens };
+        }
       } else if (event.type === "turn.failed") {
         seen.finished = true;
         seen.error = event.error?.message || "Codex 没跑完这一轮";
@@ -98,4 +118,5 @@ export default {
       return `Codex 没有登录或用不了：运行 codex login（${(error as Error).message.split("\n")[0]}）`;
     }
   },
-} satisfies Adapter;
+};
+export default adapter;

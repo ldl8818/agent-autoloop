@@ -26,6 +26,10 @@ export type Turn = {
   program?: string;
   contextFile: string;
   folder: string;
+  /** Stable across retries of this logical launch; receipt repairs have their own identity. */
+  requestId?: string;
+  /** Stop-control invocation only; never submit a business prompt. */
+  cancel?: boolean;
 };
 export type Reading = {
   text?: string;
@@ -39,10 +43,15 @@ export type Reading = {
   finished?: boolean;
   /** It has this turn's prompt, in a conversation that's there. From here on the work may be half done. */
   started?: boolean;
+  /** Work outside the local process group has not yet been confirmed ended. */
+  external?: boolean;
 };
 export type Adapter = {
   /** Its command line for this turn. */
-  command(turn: Turn): string[];
+  /** Trusted caller-specific CLI settings; plugins that accept them keep them inside any launcher. */
+  command(turn: Turn, startup?: string[]): string[];
+  /** Optional controller for work that outlives its local process group. */
+  cancel?(turn: Turn): string[];
   /** What its output says so far. `code` is null while it's still running or when it died without saying. */
   read(stdout: string, code: number | null, stderr: string): Reading;
   /** Where a person can open this session. */

@@ -77,6 +77,8 @@ agent-autoloop up
 
 PATH 没有命令时，把 `agent-autoloop` 换成安装器打印的完整路径。临时测试使用假的通知程序或通道，Windows 也不要弹真实通知；不要给已在线的飞书应用再开监听。
 
+Codex 报 `active writer` 时，不要删除锁文件或以新会话完成当作续接通过；按[原会话续接](docs/plugins.md#codex-原会话续接)核对同一会话、上下文和回答去重。
+
 ## 验证
 
 先查看安装和连接情况，再用真实 Agent 跑完整问答：
@@ -87,7 +89,7 @@ agent-autoloop doctor
 agent-autoloop try
 ```
 
-`try` 会使用用户的模型额度。在非交互终端，它打印问题和 `agent-autoloop answer` 命令后退出；这是正常等待，不是失败。把问题转给用户，按他的选择回答，再运行 `agent-autoloop status`，看到“试跑通过”才算接通。仅为安装验证时，可以选择第二项绿色完成试跑。
+`try` 会使用用户的模型额度。在非交互终端，它打印问题和 `agent-autoloop answer` 命令后退出；这是正常等待，不是失败。按[配置手册的转问约定](skills/agent-autoloop/SKILL.md#看情况回答)用普通消息转述原卡片，用户在飞书或聊天中回答后读回同一卡片；不另建无法撤销的独立待答框。运行 `agent-autoloop status`，看到“试跑通过”才算接通。仅为安装验证时，可以选择第二项绿色完成试跑；用户明确要求自己选时，由用户作答。
 
 Claude 要委托 Codex 处理网页时，可用[浏览器交接模板](examples/recipes/browser-handoff/README.md)，先配置现成入口，再验收首次调用与原会话续办。模板不安装浏览器驱动、不自动放宽 Claude 命令权限。
 

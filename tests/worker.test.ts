@@ -51,10 +51,11 @@ export default {
     const session = /session=(\\S+)/.exec(stdout)?.[1];
     const finished = stdout.includes("TURN-OVER");
     const started = stdout.includes("TURN-BEGAN");
-    if (code === null) return { session, finished, started };
-    if (code !== 0) return { session, started, error: stderr.trim() || "boom" };
+    const external = stdout.includes("EXTERNAL-WORK") && !stdout.includes("EXTERNAL-OVER");
+    if (code === null) return { session, finished, started, external };
+    if (code !== 0) return { session, started, external, error: stderr.trim() || "boom" };
     const text = stdout.replace(/session=\\S+\\n/, "").replace("TURN-OVER\\n", "").replace("TURN-BEGAN\\n", "");
-    return { text, session, finished, started, usage: { input: 1, output: 1 } };
+    return { text, session, finished, started, external, usage: { input: 1, output: 1 } };
   },
   link: (s) => "app://" + s,
 };`,
@@ -416,6 +417,39 @@ test("a run told to stop stops, with its children, and only then is it reported"
   );
   assert.deepEqual([hub.results[0].run, hub.results[0].outcome], [id, "cancelled"]);
   assert.ok(!existsSync(marker));
+});
+
+test("cancellation cannot report an external turn stopped without its confirmation", async () => {
+  for (const confirmed of [false, true]) {
+    const hub = fakeHub();
+    hub.jobs.push(
+      job({
+        use: "scripted",
+        command: [
+          `printf 'session=old\\nTURN-BEGAN\\nEXTERNAL-WORK\\n${confirmed ? "EXTERNAL-OVER\\n" : ""}'; sleep 30`,
+        ],
+      }),
+    );
+    const w = worker(hub);
+    await until(w, () => {
+      try {
+        return readFileSync(join(w.entries()[0].dir, "stdout-1.log"), "utf8").includes("EXTERNAL-WORK");
+      } catch {
+        return false;
+      }
+    });
+    hub.cancel = [w.entries()[0].run];
+    if (confirmed) {
+      await until(w, () => hub.results.length === 1);
+      assert.equal(hub.results[0].outcome, "cancelled");
+    } else {
+      await until(w, () => w.entries().some((entry) => entry.unconfirmed !== undefined));
+      assert.equal(hub.results.length, 0, "an unconfirmed stop is not a finished receipt");
+      const retained = w.entries().find((entry) => entry.unconfirmed !== undefined)!;
+      assert.ok(!hub.claims.at(-1)?.running.includes(retained.run));
+      rmSync(retained.dir, { recursive: true, force: true });
+    }
+  }
 });
 
 test("cancellation waits for a child ignoring SIGTERM, including after worker restart", async () => {

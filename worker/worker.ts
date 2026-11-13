@@ -69,6 +69,8 @@ type Entry = {
   stopping?: number;
   why?: "cancel" | "timeout" | "finished";
   result?: Result;
+  unconfirmed?: number;
+  externalStop?: boolean;
 };
 export type WorkerHub = Pick<Hub, "work" | "started" | "result">;
 export type WorkerOptions = {
@@ -214,21 +216,27 @@ export function createWorker({
     });
 
   /** Starts a turn of the agent: a process that outlives this one, leaving its output and exit code in files. */
-  function launch(entry: Entry, adapter: Adapter, prompt: string) {
+  function launch(entry: Entry, adapter: Adapter, prompt: string, cancelling = false) {
     entry.turn += 1;
     entry.launchedAt = now();
     entry.usageBaseline = entry.resume ? loadUsage(entry.job.agent.use, entry.resume) : undefined;
     delete entry.finishedAt;
     delete entry.pid;
-    delete entry.stopping;
-    delete entry.why;
+    delete entry.unconfirmed;
+    if (cancelling) {
+      entry.stopping = now();
+      entry.why ??= "cancel";
+    } else {
+      delete entry.stopping;
+      delete entry.why;
+    }
     save(entry);
     const { rule, agent } = entry.job;
     const cwd = rule.cwd.replace(/^~(?=[/\\])/, homedir());
     const turn: Turn = {
       prompt,
       session: entry.session,
-      resume: entry.resume,
+      resume: cancelling ? entry.session : entry.resume,
       cwd,
       model: agent.model,
       effort: agent.effort,
@@ -238,9 +246,10 @@ export function createWorker({
       program: agent.program,
       contextFile: path.join(entry.dir, "context.json"),
       folder: entry.dir,
+      requestId: `${entry.run}:${entry.repairs ?? 0}`,
     };
     if (!existsSync(cwd)) throw new Error(`在 ${cwd} 启动不了：这个目录不存在`);
-    const argv = adapter.command(turn);
+    const argv = cancelling ? adapter.cancel!(turn) : adapter.command(turn);
     const { out, err, exit, command } = files(entry);
     if (process.platform === "win32") {
       writeFileSync(command, JSON.stringify({ argv, cwd, exit }), { mode: 0o600 });
@@ -377,7 +386,16 @@ export function createWorker({
     if (seen.session) entry.session = seen.session;
     const usage = entry.usage && { usage: entry.usage };
     const known = session && { session };
-    if (entry.why === "cancel") return endWith(entry, { outcome: "cancelled", summary: "已停止", ...known, ...usage });
+    if ((entry.why === "cancel" || entry.why === "timeout") && seen.external) {
+      entry.externalStop = true;
+      entry.unconfirmed = now() + PAUSE;
+      save(entry);
+      sayOnce(`run ${entry.run}: 本地进程已结束，但尚未确认外部任务已停止；保留记录，仅重试停止控制。`);
+      return;
+    }
+    if (entry.why === "cancel") {
+      return endWith(entry, { outcome: "cancelled", summary: "已停止", ...known, ...usage });
+    }
     if (entry.why === "timeout") {
       const minutes = entry.job.agent.timeout ?? TIMEOUT_MINUTES;
       const error = `超过 ${minutes} 分钟还没结束，已停止`;
@@ -430,6 +448,18 @@ export function createWorker({
     } catch (error) {
       return endWith(entry, { outcome: "failed", error: String((error as Error).message).slice(0, 500) });
     }
+    if (entry.unconfirmed !== undefined) {
+      if (adapter.cancel && now() >= entry.unconfirmed) {
+        try {
+          launch(entry, adapter, entry.prompt, true);
+        } catch (error) {
+          entry.unconfirmed = now() + PAUSE;
+          save(entry);
+          sayOnce(`run ${entry.run}: 停止控制暂时不可用：${error}`);
+        }
+      }
+      return;
+    }
     if (entry.turn === 0) {
       // The worker stopped while starting it, before anything was launched.
       if (!entry.prompt) entry.prompt = promptFor(entry.job, path.join(entry.dir, "context.json"));
@@ -459,6 +489,7 @@ export function createWorker({
         if (entry.why !== "cancel") return conclude(entry, adapter, exitCode());
         // Reporting `cancelled` would release the item while a process may still be in it, which the protocol forbids
         // (docs/protocol.md: 确认组内没有活进程后才交 cancelled). A cancelled run's `failed` isn't tried again.
+        if (read(entry, adapter, exitCode()).external) return conclude(entry, adapter, exitCode());
         return endWith(entry, {
           outcome: "failed",
           error: "停止信号发出后没能确认进程组已结束：这一轮按没跑成记，不再重试，进程可能还在。",
@@ -570,7 +601,7 @@ export function createWorker({
     }
     await eachEntry(check);
     await eachEntry(settle);
-    const held = entries();
+    const held = entries().filter((entry) => entry.unconfirmed === undefined && !entry.externalStop);
     let reachable = true;
     try {
       const answer = await hub.work({
