@@ -371,6 +371,25 @@ test("restoring unavailable facts resumes planning before any execution is appro
   assert.ok(!f.calls.includes("prepare"));
 });
 
+test("rechecking an unchanged prerequisite reports the result without asking the same decision again", async () => {
+  const f = fixture();
+  const { task } = await f.start();
+  f.io.hook = async (): Promise<any> => ({ status: "blocked", message: "监测待恢复" });
+  const initial = await maintain(config, f.context([f.result(task, "recheck", {})]), f.io, 1000);
+  assert.equal(initial.ask?.length, 1);
+  const blocked = f.tasks.get(task.id)!;
+  const out = await maintain(
+    config,
+    f.context([], [{ ...f.answer(blocked, 0), options: ["复查当前状态", "暂缓", "取消"] }]),
+    f.io,
+    1000,
+  );
+  assert.equal(out.ask, undefined);
+  assert.match(out.notice?.[0].text, /监测待恢复/);
+  assert.equal(f.tasks.get(task.id)!.status, "blocked");
+  assert.equal(out.events, undefined);
+});
+
 test("a registered owner request keeps its contract and cannot dispatch twice", async () => {
   const f = fixture();
   const settings = { ...config, requests: { source: "owner", type: "task.requested" } };

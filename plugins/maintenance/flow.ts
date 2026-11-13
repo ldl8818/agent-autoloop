@@ -257,7 +257,7 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       about: about(t),
     });
   };
-  const inspect = async (t: Task) => {
+  const inspect = async (t: Task, reportOnly = false) => {
     const result = await io.hook("inspect", t);
     t.facts = result.facts;
     if (result.contract !== undefined && !t.contract) {
@@ -283,7 +283,11 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
     if (result.status !== "active") {
       t.status = "blocked";
       delete t.dispatch;
-      question(t, result.message ?? "当前证据不可用，需要恢复事实检查入口后复查。");
+      const message = result.message ?? "当前证据不可用，需要恢复事实检查入口后复查。";
+      if (reportOnly) {
+        t.blockedMessage = message;
+        notify(t, "复查结束，任务仍未完成。\n" + message, "rechecked");
+      } else question(t, message);
       return false;
     }
     return true;
@@ -390,7 +394,7 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
     if (data.revision !== t.revision) continue;
     if (["done", "cancelled"].includes(t.status)) continue;
     if (event.type === "maintenance.recheck") {
-      await inspect(t);
+      await inspect(t, t.status === "blocked");
       io.save(t);
       continue;
     }
@@ -524,7 +528,7 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
       if (t.status === "blocked") {
         if (t.blockedRole) {
           const role = t.blockedRole;
-          if (await inspect(t)) {
+          if (await inspect(t, true)) {
             t.attempts = { ...t.attempts, [role]: (t.attempts?.[role] ?? 0) + 1 };
             t.status = { plan: "planning", execute: "executing", verify: "verifying" }[role];
             delete t.blockedRole;
@@ -534,7 +538,7 @@ export async function maintain(s: Settings, context: any, io: IO, now: number): 
           continue;
         }
         if (!t.execution && !t.planning) {
-          if (await inspect(t)) {
+          if (await inspect(t, true)) {
             t.status = t.plan ? "approval" : "planning";
             delete t.approved;
             if (t.plan) question(t);
