@@ -15,6 +15,7 @@
       "cwd": "~/x",
       "skill": "s",
       "prompt": "按手册做。",
+      "title": "note-{id}",
       "group": "notes",
       "parallel": 3
     },

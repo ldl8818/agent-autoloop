@@ -17,10 +17,18 @@
 // a change merged without a review, by its agent's exemption, is attested as reviewed, or passes as reviewed when a review
 // is asked for while it waits for its check; an out-of-date project toolkit is allowed to merge, an enabled auto-merge
 // survives a failed recheck of that toolkit; a lost auto-merge response triggers a second mutation; a lost branch-update
-// response ignores the already-synchronized head instead of continuing the same handoff.
+// response ignores the already-synchronized head instead of continuing the same handoff; an accepted check with no jobs
+// waits through five half-hour retries, or is restarted repeatedly, and a draft or manual run then authorizes merging.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deliver, fullCheck, waitLive, disableAuto, type DeliveryIO } from "../plugins/delivery/delivery.ts";
+import {
+  deliver,
+  fullCheck,
+  waitLive,
+  disableAuto,
+  DeliveryRefusal,
+  type DeliveryIO,
+} from "../plugins/delivery/delivery.ts";
 import { settings } from "../plugins/delivery/project.ts";
 const config = settings({
   repo: "example/app",
@@ -658,6 +666,145 @@ test("the run that going ready starts decides, passed or failed", async () => {
   await assert.rejects(() => deliver("example/app", 1, failed.io), /检查/);
   assert.equal(failed.state.merges, 0);
 });
+
+function queuedFullCheck(status = "queued", age = 10 * 60_000 + 1, jobs: any[] = []) {
+  const { io, state } = fixture();
+  state.now = Date.parse("2026-11-12T00:00:00Z");
+  state.checkRuns = [
+    { ...run(10, "head", status, null), event: "pull_request", created_at: new Date(state.now - age).toISOString() },
+  ];
+  const checkJobs = new Map([[10, jobs]]);
+  const jobsRead: number[] = [];
+  io.now = () => state.now;
+  const { api } = io;
+  io.api = async (path, body, method) => {
+    if (path.startsWith("actions/workflows/check.yml")) return { workflow_runs: structuredClone(state.checkRuns) };
+    const asked = /^actions\/runs\/(\d+)\/jobs/.exec(path);
+    if (asked) {
+      jobsRead.push(Number(asked[1]));
+      return { jobs: checkJobs.get(Number(asked[1])) ?? [] };
+    }
+    if (path === "pulls/1/draft") {
+      state.writes.push(path);
+      state.pr.draft = true;
+      return {};
+    }
+    return api(path, body, method);
+  };
+  return { io, state, checkJobs, jobsRead };
+}
+const passedJob = { name: "check", status: "completed", conclusion: "success" };
+const stalledReason =
+  "GitHub 收下了检查却一直没开始跑（多半是 GitHub 出了事故），已重新触发一次仍不动。等 GitHub 恢复后重新交付。";
+
+test("an old accepted check without jobs is restarted once and only its new ready run can merge", async () => {
+  for (const status of ["queued", "waiting", "pending"]) {
+    const { io, state, checkJobs, jobsRead } = queuedFullCheck(status);
+    const { api } = io;
+    io.api = async (path, body, method) => {
+      const result = await api(path, body, method);
+      if (path === "pulls/1/draft") {
+        state.checkRuns.push({ ...run(11, "head"), event: "pull_request" });
+        checkJobs.set(11, [passedJob]);
+      }
+      if (path === "pulls/1/ready") {
+        state.checkRuns.push({ ...run(99, "head"), event: "workflow_dispatch" });
+        checkJobs.set(99, [passedJob]);
+      }
+      return result;
+    };
+    let waits = 0;
+    io.wait = async () => {
+      assert.equal(state.pr.draft, false);
+      assert.ok(state.writes.includes("pulls/1/ready"));
+      waits++;
+      state.checkRuns.push({ ...run(12, "head"), event: "pull_request" });
+      checkJobs.set(12, [passedJob]);
+    };
+    assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+    assert.deepEqual(
+      state.writes.filter((path: string) => /\/(draft|ready)$/.test(path)),
+      ["pulls/1/draft", "pulls/1/ready"],
+    );
+    assert.equal(waits, 1);
+    assert.deepEqual(jobsRead, [10, 12]);
+    assert.deepEqual(io.checkRecovery, { head: "head", after: 11 });
+    assert.equal(state.merges, 1);
+  }
+});
+
+test("a restarted check that also stalls is refused immediately without a second restart", async () => {
+  const { io, state } = queuedFullCheck();
+  const { api } = io;
+  io.api = async (path, body, method) => {
+    const result = await api(path, body, method);
+    if (path === "pulls/1/ready")
+      state.checkRuns.push({
+        ...run(12, "head", "queued", null),
+        event: "pull_request",
+        created_at: new Date(state.now).toISOString(),
+      });
+    return result;
+  };
+  let waits = 0;
+  io.wait = async () => {
+    assert.ok(state.writes.includes("pulls/1/ready"));
+    assert.equal(++waits, 1);
+    state.now += 10 * 60_000 + 1;
+  };
+  await assert.rejects(
+    () => deliver("example/app", 1, io),
+    (error) => error instanceof DeliveryRefusal && error.message === stalledReason && error.head === "head",
+  );
+  assert.deepEqual(
+    state.writes.filter((path: string) => /\/(draft|ready)$/.test(path)),
+    ["pulls/1/draft", "pulls/1/ready"],
+  );
+  assert.equal(state.merges, 0);
+});
+
+test("an accepted check within ten minutes keeps waiting without a restart", async () => {
+  for (const age of [20_000, 10 * 60_000]) {
+    const { io, state, checkJobs } = queuedFullCheck("queued", age);
+    let waits = 0;
+    io.wait = async () => {
+      assert.equal(++waits, 1);
+      Object.assign(state.checkRuns[0], { status: "completed", conclusion: "success" });
+      checkJobs.set(10, [passedJob]);
+    };
+    assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+    assert.equal(waits, 1);
+    assert.ok(!state.writes.some((path: string) => /\/(draft|ready)$/.test(path)));
+  }
+});
+
+test("an old check with a queued job keeps waiting for a machine without a restart", async () => {
+  for (const name of ["check", "prepare"]) {
+    const { io, state, checkJobs } = queuedFullCheck("queued", 15 * 60_000, [{ name, status: "queued" }]);
+    let waits = 0;
+    io.wait = async () => {
+      assert.equal(++waits, 1);
+      Object.assign(state.checkRuns[0], { status: "completed", conclusion: "success" });
+      checkJobs.set(10, [passedJob]);
+    };
+    assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+    assert.equal(waits, 1);
+    assert.ok(!state.writes.some((path: string) => /\/(draft|ready)$/.test(path)));
+  }
+});
+
+test("the next delivery round remembers the restart only for the same head", async () => {
+  const { io, state } = queuedFullCheck();
+  state.checkRuns[0].id = 12;
+  io.checkRecovery = { head: "head", after: 11 };
+  await assert.rejects(() => deliver("example/app", 1, io), { message: stalledReason });
+  assert.ok(!state.writes.some((path: string) => /\/(draft|ready)$/.test(path)));
+  const next = queuedFullCheck();
+  next.io.checkRecovery = { head: "previous", after: 99 };
+  await assert.rejects(() => deliver("example/app", 1, next.io), /still waiting/);
+  assert.ok(next.state.writes.includes("pulls/1/draft"));
+});
+
 test("a matrix job counts as the required job, every leg of it", async () => {
   const done = { conclusion: "success", status: "completed" };
   const leg = (name: string, fields: object = done) => ({ name, ...fields });

@@ -36,9 +36,17 @@ const ONLINE = 120_000 + SEEN_EVERY;
 const PAGE = 60;
 const WEEK = 7 * 86400_000;
 
-export type Spending = { rounds: number; tokens: number; cost: number; missingTokens: number; missingCost: number };
+export type Spending = {
+  rounds: number;
+  tokens: number;
+  cached: number;
+  cost: number;
+  missingTokens: number;
+  missingCost: number;
+};
 const SPENDING = `SELECT COUNT(*) AS rounds,
   COALESCE(SUM(COALESCE(json_extract(usage, '$.input'), 0) + COALESCE(json_extract(usage, '$.output'), 0)), 0) AS tokens,
+  COALESCE(SUM(json_extract(usage, '$.cached')), 0) AS cached,
   COALESCE(SUM(json_extract(usage, '$.cost')), 0) AS cost,
   COUNT(*) - COUNT(COALESCE(json_extract(usage, '$.input'), json_extract(usage, '$.output'))) AS missingTokens,
   COUNT(*) - COUNT(json_extract(usage, '$.cost')) AS missingCost
@@ -89,6 +97,31 @@ function tally(counted: Row[]) {
 // walking every event by id.
 const SKIPPED = `SELECT id, source, type, subject, summary, paused, received_at FROM events
   WHERE paused > '' ORDER BY +id DESC LIMIT 20`;
+// The same, for one rule since its pause began, less those a replay has since handed to a run of the rule.
+const SKIPPED_BY = `FROM events WHERE paused > '' AND received_at >= ?
+  AND EXISTS (SELECT 1 FROM json_each(paused) WHERE value = ?)
+  AND NOT EXISTS (SELECT 1 FROM run_events JOIN runs ON runs.id = run_events.run_id
+    WHERE run_events.event_id = events.id AND runs.rule = ?)`;
+/** How many of the events a pause skipped come listed with it; the count says how many there are in all. */
+const LISTED = 20;
+
+const skippedView = ({ paused, received_at: receivedAt, ...event }: Row) => ({
+  ...event,
+  receivedAt,
+  rules: JSON.parse(paused),
+});
+
+/**
+ * What a pause has kept from a rule since `since` and nothing has made up yet, newest first: how many, and the latest of
+ * them, or all of them.
+ */
+export function skippedOf(all: Reads["all"], rule: string, since: string, everything = false) {
+  const { count } = all<{ count: number }>(`SELECT COUNT(*) AS count ${SKIPPED_BY}`, [since, rule, rule])[0];
+  const columns = "SELECT id, source, type, subject, summary, paused, received_at";
+  const order = `ORDER BY +id DESC${everything ? "" : ` LIMIT ${LISTED}`}`;
+  const events = all<Row>(`${columns} ${SKIPPED_BY} ${order}`, [since, rule, rule]);
+  return { count, events: events.map(skippedView) };
+}
 
 export function stateOf(now: number, before: number | undefined, rules: Rules, { all, view, unrouted }: Reads) {
   const seen = new Map(
@@ -113,13 +146,20 @@ export function stateOf(now: number, before: number | undefined, rules: Rules, {
   const hasMore = page.length > PAGE;
   const byId = new Map([...page.slice(0, PAGE), ...active].map((run) => [run.id, run]));
   const visible = [...byId.values()].sort((a, b) => b.id - a.id);
-  // A pause past its end is lifted at the next tick; until then it already doesn't hold.
-  const pauses = all<Row>("SELECT name, by, reason, since, until FROM pauses ORDER BY name").filter(
-    (pause) => pause.until === null || Date.parse(pause.until) > now,
-  );
+  // A pause past its end is lifted at the next tick; until then it already doesn't hold. A schedule lets its moments pass
+  // and keeps no events.
+  const timed = new Set(rules.rules.filter((rule) => !eventRule(rule)).map((rule) => rule.name));
+  const pauses = all<Row>("SELECT name, by, reason, since, until FROM pauses ORDER BY name")
+    .filter((pause) => pause.until === null || Date.parse(pause.until) > now)
+    .map((pause): Row => ({
+      ...pause,
+      skipped: timed.has(pause.name) ? null : skippedOf(all, pause.name, pause.since),
+    }));
   const pauseOf = (rule: Rules["rules"][number]) => {
     const pause = pauses.find((p) => p.name === rule.name);
-    return pause ? { by: pause.by, reason: pause.reason, since: pause.since, until: pause.until } : null;
+    if (!pause) return null;
+    const { by, reason, since, until, skipped } = pause;
+    return { by, reason, since, until, skipped };
   };
   const skippedAt = new Map(
     all<Row>("SELECT rule, skipped_at FROM schedules").map((row) => [row.rule, row.skipped_at]),
@@ -151,14 +191,11 @@ export function stateOf(now: number, before: number | undefined, rules: Rules, {
       skippedAt: eventRule(rule) ? null : (skippedAt.get(rule.name) ?? null),
     })),
     pauses,
-    skipped: all<Row>(SKIPPED).map(({ paused, received_at: receivedAt, ...event }) => ({
-      ...event,
-      receivedAt,
-      rules: JSON.parse(paused),
-    })),
-    elsewhere: rules.elsewhere.map(({ name, source, to, cron, where }) => {
+    skipped: all<Row>(SKIPPED).map(skippedView),
+    elsewhere: rules.elsewhere.map(({ name, source, to, cron, where, model, effort }) => {
       const next = iso(nextRun(parseCron(cron)!, now, rules.timezone) ?? now);
-      return { id: name, name, source, agent: to, cron, every: describeCron(cron), next, where };
+      const shown = { id: name, name, source, agent: to, cron, every: describeCron(cron), next, where };
+      return { ...shown, ...(model && { model }), ...(effort && { effort }) };
     }),
     agents: Object.entries(rules.agents).map(([id, { name, use, worker, program }]) => {
       const totals = tally(counts.filter((row) => row.agent === id));

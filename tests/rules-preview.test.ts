@@ -26,6 +26,10 @@ test("the explanation shows rule and Agent claim limits independently", () => {
     lines.find((line) => line.startsWith("  意见："))!,
     /并发 3 · 本规则最多同时 1 轮/,
   );
+  assert.match(
+    lines.find((line) => line.startsWith("  意见："))!,
+    /会话标题 note-\{id\}/,
+  );
 });
 const home = setup("rules-preview");
 const cli = async (...args: string[]) =>

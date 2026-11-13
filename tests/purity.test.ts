@@ -12,7 +12,7 @@ const kernel = readdirSync(join(root, "kernel"))
   .map((f) => [f, readFileSync(join(root, "kernel", f), "utf8")] as const);
 
 const VENDORS =
-  /claude|anthropic|codex|openai|gemini|cursor|hermes|openclaw|feishu|lark|dingtalk|telegram|slack|github|gitlab|\bacp\b|\bdsh\b/i;
+  /claude|anthropic|codex|openai|gemini|cursor|hermes|openclaw|feishu|lark|dingtalk|telegram|slack|github|gitlab|\bacp\b|\bdsh\b|\bzcode\b/i;
 
 /** A comment may say where a limit came from. */
 function namesNoProduct(file: string, text: string) {

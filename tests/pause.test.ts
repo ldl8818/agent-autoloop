@@ -5,15 +5,20 @@
 // before the pause, or an answer that came during it, is handed out while paused or lost; a pause is forgotten when the
 // projection is rebuilt from the log; running now doesn't go through the queue, isn't marked as the owner's, waits out a
 // retry backoff, runs a paused rule, or takes a subject no event could carry; an unknown rule is accepted; pausing again
-// with nothing new adds a fact or restarts the pause's clock.
+// with nothing new adds a fact or restarts the pause's clock. A resume doesn't say which pause it lifted; a replay hands
+// the rule anything but the events its pause skipped as they came, hands one over twice, goes ahead while the rule is
+// still paused, changes the event's own record, keeps it from another rule its pause also skipped it for, or leaves no
+// trace in the run's story that it was a replay.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { at, setup } from "./helpers.ts";
 
 setup("pause");
-const { execute, getView, tick, ingest, claimNext, heartbeat, finish, stateOf, logAfter, db } =
+const { execute, getView, tick, ingest, claimNext, heartbeat, finish, stateOf, logAfter, db, why } =
   await import("./hub.ts");
 const { rebuild } = await import("../kernel/store.ts");
+const { eventOutcome } = await import("../kernel/query.ts");
+const { formatWhy } = await import("../cli/why.ts");
 const { rows } = await import("../kernel/evolve.ts");
 const { all, run } = await import("./storage.ts");
 
@@ -26,6 +31,7 @@ const ticks = () =>
 const runsOf = (rule: string) => all<{ id: number; state: string }>("SELECT * FROM runs WHERE rule = ?", [rule]);
 const pause = (name: string, given: object, now: number) => execute("pauseRule", [name, "owner", given], now);
 const resume = (name: string, now: number) => execute("resumeRule", [name], now);
+const replay = (name: string, events: number[], now: number) => execute("replayRule", [name, events], now);
 const line = (name: string, now: number) => stateOf(now).lines.find((l: { name: string }) => l.name === name)!;
 const claim = (worker: string, now: number) => claimNext(worker, `c${Math.random()}`, now);
 
@@ -164,6 +170,64 @@ test("running now doesn't wait out a retry, and isn't for a paused or unknown ru
   assert.throws(() => resume("没有的", at(5)), /没有这条规则/);
   assert.throws(() => pause("每周清理", {}, at(5)), /别处/);
   resume("早报", at(6));
+});
+
+test("a replay hands the rule the very events its pause skipped, each once, after the pause is lifted", () => {
+  clean();
+  heartbeat("w1", [], at(0));
+  const paused = pause("意见", { reason: "下游在修" }, at(1));
+  const send = (id: string, subject: string, now: number) =>
+    ingest(
+      "app",
+      {
+        id,
+        type: "feedback.new",
+        subject,
+        summary: `${subject} 的意见`,
+        detail: "原文",
+        link: `https://app.test/${id}`,
+      },
+      now,
+    ).event;
+  const first = send("f1", "#1", at(2));
+  const second = send("f2", "#2", at(3));
+  assert.throws(() => replay("意见", [first, second], at(4)), /暂停中.*先恢复/);
+  const resumed = resume("意见", at(5));
+  assert.deepEqual([resumed.paused.since, resumed.paused.reason], [paused.paused.since, "下游在修"]);
+  const done = replay("意见", [first, second], at(6));
+  assert.deepEqual(done.events, [first, second]);
+  assert.equal(done.runs.length, 2, "a run for each subject, as if they had come now");
+  const jobs = [claim("w1", at(7))!, claim("w1", at(7))!];
+  assert.deepEqual(
+    jobs.flatMap((job) => job.context.events.map((e) => [e.id, e.type, e.subject, e.summary, e.detail, e.link])).sort(),
+    [
+      ["f1", "feedback.new", "#1", "#1 的意见", "原文", "https://app.test/f1"],
+      ["f2", "feedback.new", "#2", "#2 的意见", "原文", "https://app.test/f2"],
+    ],
+  );
+  assert.deepEqual(replay("意见", [first, second], at(8)), { events: [], runs: [] }, "never twice");
+  assert.equal(runsOf("意见").length, 2);
+  const outcome = eventOutcome(getView(), "app", first)!;
+  assert.deepEqual(
+    [outcome.paused, outcome.runs.map((run) => [run.run, run.rule])],
+    [["意见"], [[done.runs[0], "意见"]]],
+    "the event stays as it came, and its source sees the run that took it",
+  );
+  assert.match(formatWhy(done.runs[0], why(done.runs[0])), /本人补跑暂停时跳过的事件/);
+
+  pause("告警", {}, at(10));
+  pause("告警也记一笔", {}, at(10));
+  const both = ingest("ops", { id: "a1", type: "alert.raised", subject: "db" }, at(11));
+  assert.deepEqual(both.paused, ["告警", "告警也记一笔"]);
+  resume("告警", at(12));
+  assert.deepEqual(replay("告警", [both.event], at(13)).events, [both.event]);
+  assert.deepEqual(replay("告警", [both.event], at(13)).events, []);
+  resume("告警也记一笔", at(14));
+  assert.deepEqual(replay("告警也记一笔", [both.event], at(15)).events, [both.event], "still owed to the other rule");
+  assert.deepEqual(
+    eventOutcome(getView(), "ops", both.event)!.runs.map((run) => run.rule),
+    ["告警", "告警也记一笔"],
+  );
 });
 
 test("pausing again with nothing new adds no fact and keeps when it started", () => {

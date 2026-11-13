@@ -2,7 +2,7 @@
 // the one its session was saved with; a call that needs approval waits for someone who isn't there; a resumed turn starts a
 // new session; a run that's still going, or whose turn has ended while its background work finishes, is taken for an answer
 // or a failure, and stopped; a run that ended in an error or without an answer is taken for a result; the token counts of a
-// run's several steps are dropped; a program that's missing, broken or too old to take these options passes for usable, or
+// run's several steps are dropped, or its input leaves out the cache's reads and writes; a program that's missing, broken or too old to take these options passes for usable, or
 // a mistake it can only report on stdout is lost. The events are the shapes in DSH's own
 // packages/bundle/headless/src/json-stream.ts and startup.ts; its real program has not been run here. The program is looked up through the login shell, so this points the shell and HOME at
 // this test's own instead of whatever this machine has installed.
@@ -108,7 +108,7 @@ test("DSH: a completed turn's final text is its answer, with every step's tokens
   );
   assert.deepEqual(reading, {
     session: "session-1",
-    usage: { input: 7510, output: 6, cached: 5121 },
+    usage: { input: 12631, output: 6, cached: 5121 },
     started: true,
     finished: true,
     text: "好了",
@@ -125,7 +125,7 @@ test("DSH: a turn that's still going has no answer and no error", () => {
   assert.equal(reading.error, undefined, "still going isn't a failure");
   assert.deepEqual(reading, {
     session: "session-1",
-    usage: { input: 7, output: 1, cached: 2 },
+    usage: { input: 9, output: 1, cached: 2 },
     started: true,
   });
   // A turn has ended, but the run waits on its background work, which may start another: it isn't over until `final`.

@@ -3,9 +3,11 @@
 // couldn't work, or that there was nothing to do, is taken as work done; a heading or a receipt ends up in the summary; a
 // receipt that doesn't parse, has unknown fields or breaks the protocol's limits is applied rather than sent back to be
 // rewritten; the receipt isn't found when the message says something after it, or a code block of another kind is taken for
-// one; a code fence inside one of the receipt's strings cuts it short; a result longer than the hub takes is sent as it is;
-// a browser/login block is reported as retryable failure; a session carried on keeps to the copy of its skill it read
-// before, though the skill has changed since.
+// one; a code fence inside one of the receipt's strings cuts it short; a result longer than the hub takes is sent as it
+// is, or is cut through the middle of a character so its last glyph reaches the hub as garbage; a browser/login block is
+// reported as retryable failure; a session carried on keeps to the copy of its skill it read
+// before, though the skill has changed since. A rule's session title isn't the first line, so every run of it looks the
+// same in a client that names a session after its first message; or it is filled from a subject the run doesn't share.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { promptFor, readMessage, repairPrompt, resultFrom } from "../worker/contract.ts";
@@ -67,6 +69,23 @@ test("the prompt says what to do and how to end, but not what anyone wrote", () 
   assert.ok(!text.includes("王某"));
   assert.ok(!text.includes("管理员权限"));
   assert.ok(!text.includes('"events"'), "a rule that can't emit isn't offered it");
+});
+
+test("a rule's session title is the first line, filled from the subject its events share", () => {
+  const titled = (title: string, subjects: string[]) => {
+    const base = job();
+    const events = subjects.map((subject, i) => ({ ...base.context.events[0], id: String(i), subject }));
+    const given = { ...base, rule: { ...base.rule, title }, context: { ...base.context, events } };
+    return promptFor(given as any, "/tmp/ctx.json").split("\n");
+  };
+  const lines = titled("tapd-{id}-测试", ["tapd#story/1134", "tapd#story/1134"]);
+  assert.equal(lines[0], "tapd-1134-测试");
+  assert.match(lines[1], /^Agent 自动化中台按规则「意见」/);
+  assert.equal(titled("{subject}", ["tapd#story/1134"])[0], "tapd#story/1134");
+  assert.equal(titled("gh-{id}", ["owner/repo#249"])[0], "gh-249");
+  assert.equal(titled("tapd-{id}-测试", ["#1", "#2"])[0], "tapd--测试", "two subjects: neither is this run's");
+  assert.equal(titled("早报-{id}", [])[0], "早报-", "a schedule has no subject");
+  assert.match(promptFor(job() as any, "/tmp/ctx.json").split("\n")[0], /^Agent 自动化中台/, "no title, no line");
 });
 
 test("the prompt mentions what this run is carrying on, and what it may emit", () => {
@@ -225,9 +244,9 @@ test("a result is put together and checked as the hub will check it", () => {
   );
   assert.match(broken.problem!, /ask/);
   assert.deepEqual(broken.result, { outcome: "done", summary: "好了" }, "what stands without the receipt");
-  const long = resultFrom({ outcome: "done", summary: "😀".repeat(600) }, {});
-  assert.ok(long.result.summary!.length <= 500);
-  assert.ok(!long.result.summary!.endsWith("\ud83d"), "not cut through a character");
+  // The leading "a" puts the 500th unit inside a pair; with pairs alone the cut would fall between two characters.
+  const long = resultFrom({ outcome: "done", summary: "a" + "😀".repeat(600) }, {});
+  assert.equal(long.result.summary!.length, 499, "not cut through a character, and only the half dropped");
   assert.ok(resultFrom({ outcome: "failed", error: "x".repeat(600) }, {}).result.error!.length <= 500);
 });
 

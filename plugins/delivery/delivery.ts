@@ -16,6 +16,8 @@ export type DeliveryIO = {
   releaseRequired(base: string, head: string, patterns: string[]): Promise<boolean>;
   live(config: Settings): Promise<Live | null>;
   wait(): Promise<void>;
+  now?(): number;
+  checkRecovery?: { head: string; after: number };
   reviewStatus?: string;
   report?: DeliveryReport;
 };
@@ -51,6 +53,7 @@ export class DeliveryRefusal extends Error {
 export class DeliverySuperseded extends Error {}
 
 const FINDINGS = "审查发现问题，修复后推新提交才会重审";
+const STALL = 10 * 60_000;
 const labels = (pr: any) => new Set<string>((pr.labels ?? []).map((label: any) => label.name));
 const newestFirst = (a: any, b: any) => b.id - a.id;
 
@@ -88,17 +91,22 @@ export async function fullCheck(
   config: Settings,
   io: DeliveryIO,
   after = 0,
-): Promise<"passed" | "waiting" | "failed"> {
+): Promise<"passed" | "waiting" | "failed" | "stalled"> {
   const { job } = config.check;
   const run = await newestCheck(head, config, io);
   if (!run || run.id <= after) return "waiting";
-  const jobs = (await io.api(`actions/runs/${run.id}/jobs?filter=latest&per_page=100`)).jobs.filter(
-    (candidate: any) => candidate.name === job || candidate.name.startsWith(`${job} (`),
-  );
-  if (!jobs.length) return "waiting";
+  const { jobs } = await io.api(`actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
+  if (
+    !jobs.length &&
+    ["queued", "waiting", "pending"].includes(run.status) &&
+    (io.now?.() ?? Date.now()) - Date.parse(run.created_at) > STALL
+  )
+    return "stalled";
+  const required = jobs.filter((candidate: any) => candidate.name === job || candidate.name.startsWith(`${job} (`));
+  if (!required.length) return "waiting";
   if (run.status === "completed" && run.conclusion !== "success") return "failed";
   const finished = (item: any) => item.status === "completed" && item.conclusion === "success";
-  return finished(run) && jobs.every(finished) ? "passed" : "waiting";
+  return finished(run) && required.every(finished) ? "passed" : "waiting";
 }
 
 export async function waitLive(merged: string, config: Settings, io: DeliveryIO, head?: string) {
@@ -183,7 +191,7 @@ export async function deliver(
   if (pr.head.repo?.full_name !== repo || pr.base.ref !== "main")
     throw new DeliveryRefusal("只处理本仓库分支到 main 的合并请求", pr.head.sha);
   if (pr.auto_merge) await disableAuto(number, io);
-  let head = pr.head.sha;
+  let head: string = pr.head.sha;
   const accept = async () => {
     await status(io, head, "delivery", "pending", "正在审查、检查和核实发布");
     await io.report?.("accepted", head);
@@ -263,10 +271,11 @@ export async function deliver(
       continue;
     }
     await io.report?.("checking", head);
-    let after = 0;
+    let after = io.checkRecovery?.head === head ? io.checkRecovery.after : 0;
     if (current.draft) {
       // Right after going ready the newest run is still a draft one: only a run started by the change can pass.
       after = (await newestCheck(head, config, io))?.id ?? 0;
+      if (io.checkRecovery?.head === head) io.checkRecovery.after = after;
       await io.api(`pulls/${number}/ready`, {}, "POST");
     }
     let merging = false;
@@ -300,6 +309,21 @@ export async function deliver(
           await stopAuto();
           if (!exempt && !io.verifyReview) return reviewOnly(pr);
           continue rounds;
+        }
+        if (state === "stalled") {
+          if (io.checkRecovery?.head === head)
+            throw new DeliveryRefusal(
+              "GitHub 收下了检查却一直没开始跑（多半是 GitHub 出了事故），已重新触发一次仍不动。等 GitHub 恢复后重新交付。",
+              head,
+            );
+          await stopAuto();
+          await io.api(`pulls/${number}/draft`, {}, "POST");
+          io.checkRecovery = { head, after };
+          // Converting to draft can start another run. Only a run created after going ready can authorize merging.
+          after = (await newestCheck(head, config, io))?.id ?? 0;
+          io.checkRecovery.after = after;
+          await io.api(`pulls/${number}/ready`, {}, "POST");
+          continue;
         }
         if (state === "failed") {
           throw new DeliveryRefusal(`完整检查没有通过。查看 https://github.com/${repo}/pull/${number}/checks`, head);

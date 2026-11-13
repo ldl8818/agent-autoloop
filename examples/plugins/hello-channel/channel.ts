@@ -4,7 +4,15 @@
 //   config.json: "channels": { "cards": { "use": "hello-channel", "key": "…", "file": "/绝对路径/cards.txt" } }
 import { appendFileSync } from "node:fs";
 
-type Card = { id: number; version: number; ref: string | null; title: string; text: string; options: string[] };
+type Card = {
+  id: number;
+  version: number;
+  ref: string | null;
+  title: string;
+  text: string;
+  options: string[];
+  rule?: string;
+};
 type Context = {
   hub: {
     nextCard(wait: number): Promise<{ card: Card | null }>;
@@ -16,8 +24,15 @@ type Context = {
   signal: AbortSignal;
 };
 
-const words = ({ id, title, text, options }: Card) =>
-  [`#${id} ${title}`, text, ...options.map((option, index) => `  ${index + 1}. ${option}`), ""].join("\n");
+// Cards come from many rules: say which one, unless the title is already its name.
+const words = ({ id, title, text, options, rule }: Card) =>
+  [
+    `#${id} ${title}`,
+    ...(rule && rule !== title ? [`来源：${rule}`] : []),
+    text,
+    ...options.map((option, index) => `  ${index + 1}. ${option}`),
+    "",
+  ].join("\n");
 
 export default async function helloChannel({ hub, options, log, signal }: Context) {
   while (!signal.aborted) {

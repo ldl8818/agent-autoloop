@@ -19,9 +19,10 @@ function fill(template: unknown, text: string): unknown {
 const asWords = (text: string) => text.replaceAll("](", "］(").replaceAll("<", "＜");
 
 function words(card: Card, platform = "") {
+  const rule = card.rule && card.rule !== card.title ? card.rule : "";
   if (platform === "wecom")
     card = { ...card, title: asWords(card.title), text: asWords(card.text), options: card.options.map(asWords) };
-  const source = platform === "wecom" && card.rule ? `来源：${asWords(card.rule)}` : "";
+  const source = rule ? `来源：${platform === "wecom" ? asWords(rule) : rule}` : "";
   if (
     platform === "wecom" &&
     card.kind === "notice" &&

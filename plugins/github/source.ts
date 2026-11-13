@@ -23,7 +23,7 @@ export default function github({ headers, body, secret }: Input) {
       type,
       subject: `${repo}${number}`.replace(/[^A-Za-z0-9#._:/@-]/g, "-").slice(0, 100),
       summary: String(payload.comment?.body ?? object?.title ?? payload.head_commit?.message ?? "").slice(0, 200),
-      detail: String(object?.body ?? "").slice(0, 4000),
+      detail: String(payload.comment?.body ?? object?.body ?? "").slice(0, 4000),
       link: encodeURI(
         String(payload.comment?.html_url ?? object?.html_url ?? payload.repository?.html_url ?? ""),
       ).slice(0, 500),

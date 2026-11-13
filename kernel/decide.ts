@@ -631,13 +631,37 @@ const CONTROL = {
   },
   resumeRule(draft: Draft, name: string) {
     // A rule taken out of rules.json while paused can still have its pause lifted.
-    if (!draft.view.get("pauses", name)) {
+    const pause = draft.view.get("pauses", name);
+    if (!pause) {
       knownRule(draft, name);
       return { changed: false, rule: name };
     }
     set(draft, "pauses", name, null);
     reopen(draft, name, draft.now);
-    return { changed: true, rule: name };
+    // Which pause it was: what it skipped is read from when it began, and once it's gone nothing else says when.
+    return { changed: true, rule: name, paused: pauseView(pause) };
+  },
+  /** Events a pause kept from the rule, taken by it now as they would have been then: each once, never while paused. */
+  replayRule(draft: Draft, name: string, events: number[]) {
+    const rule = knownRule(draft, name);
+    if (!eventRule(rule))
+      throw new InputError(`「${name}」是定时规则，暂停时到点不跑、不记事件，没有可补跑的；要补一轮用 run`);
+    if (pauseOf(draft.view, rule, draft.now)) throw new Conflict(`规则「${name}」暂停中，先恢复再补跑`);
+    // An event stays as it came, still saying which pauses skipped it. What says it's been made up is a run of this rule
+    // holding it, and a link once made only ever moves to another run of the same rule and matter.
+    const taken = (id: number) =>
+      rows(draft.view, "run_events", { event_id: id }).some(
+        (link) => draft.view.get("runs", link.run_id)?.rule === name,
+      );
+    const replayed: number[] = [];
+    const runs = new Set<number>();
+    for (const id of [...events].sort((a, b) => a - b)) {
+      const event = draft.view.get("events", id);
+      if (!event || !JSON.parse(event.paused ?? "[]").includes(name) || taken(id)) continue;
+      runs.add(enqueue(draft, rule, id, rule.parallel ? event.subject : ""));
+      replayed.push(id);
+    }
+    return { events: replayed, runs: [...runs] };
   },
   /** One run now, through the usual queue, from an event of its own that says the owner asked for it. */
   runRule(draft: Draft, name: string, by: string, given: Row) {

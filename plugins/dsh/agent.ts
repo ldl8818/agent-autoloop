@@ -18,11 +18,14 @@ const WHY_NOT: Record<string, string> = {
   "max-tokens": "这一轮用完了输出上限",
 };
 
-/** dsh reports each step's tokens as inputTokens / outputTokens / cacheReadTokens. */
+/** dsh reports each step's tokens as inputTokens / outputTokens / cacheReadTokens / cacheWriteTokens. Its inputTokens
+ * leave out the cache's reads and writes; `input` counts all of it, as Codex's does. */
 function stepUsage(reported: any): Usage | undefined {
   if (!reported || typeof reported !== "object") return undefined;
   const step: Usage = {};
-  if (typeof reported.inputTokens === "number") step.input = reported.inputTokens;
+  const count = (value: unknown) => (typeof value === "number" ? value : 0);
+  if (typeof reported.inputTokens === "number")
+    step.input = reported.inputTokens + count(reported.cacheReadTokens) + count(reported.cacheWriteTokens);
   if (typeof reported.outputTokens === "number") step.output = reported.outputTokens;
   if (typeof reported.cacheReadTokens === "number") step.cached = reported.cacheReadTokens;
   return Object.keys(step).length ? step : undefined;

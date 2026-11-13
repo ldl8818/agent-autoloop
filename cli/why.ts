@@ -89,6 +89,10 @@ export function formatWhy(id: number, facts: Fact[]) {
       if (table === "events" && row && !before && events.has(row.id)) {
         add(row.received_at, `触发事件：${eventText(row)}`);
       }
+      if (fact.type === "replayRule" && table === "run_events" && row?.run_id === id) {
+        const event = previous.get(`events:${row.event_id}`);
+        add(fact.at, `本人补跑暂停时跳过的事件${event ? `：${eventText(event)}` : ""}`);
+      }
       if (table === "runs" && row?.id === id) tellRun(fact, row, before, receipt);
       if (table === "cards" && row) tellCard(row, before, receipt);
       if (receipt && table === "timers") {

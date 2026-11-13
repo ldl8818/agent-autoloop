@@ -15,7 +15,8 @@ export default function gitlab({ headers, body, secret }: Input) {
   const type = (attributes.action ? `${kind}.${attributes.action}` : kind).toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
   const project = payload.project ?? {};
   const repo = String(project.path_with_namespace ?? project.name ?? "");
-  const number = attributes.iid ? `#${attributes.iid}` : "";
+  const object = kind === "note" ? (payload.merge_request ?? payload.issue ?? attributes) : attributes;
+  const number = object.iid ? `#${object.iid}` : "";
   return [
     {
       // GitLab before 17.4 has no such header. The body is the same on a retry and differs between events.

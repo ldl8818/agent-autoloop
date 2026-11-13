@@ -9,6 +9,10 @@ import { checkSchema } from "../protocol/schema.ts";
 test("published event schema accepts the same depth as the runtime", () => {
   assert.deepEqual(checkSchema("event", { id: "one", type: "one", hops: 8 }), []);
   assert.notDeepEqual(checkSchema("event", { id: "one", type: "one", hops: -1 }), []);
+  // Deeper than the dispatch cutoff is still a valid event — it is recorded and not dispatched — so a schema capped at
+  // the cutoff would refuse what the runtime takes.
+  assert.equal(parseEvent({ id: "one", type: "one", hops: 9 }).hops, 9);
+  assert.deepEqual(checkSchema("event", { id: "one", type: "one", hops: 9 }), []);
 });
 test("receipt events cannot forge hops; over eight is recorded without dispatch", () => {
   const w = new World();

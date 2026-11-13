@@ -81,6 +81,8 @@ for (const platform of ["dingtalk", "wecom", "slack", "discord"])
       assert.doesNotMatch(received[0].markdown.content, /\[打开链接\]\(https:\/\/example\.com\/c\/a\)/);
       assert.deepEqual(calls, ["delivered", "failed"]);
     }
+    const words = JSON.stringify(received[0]);
+    assert.match(words, /来源：项目巡检/, "every platform says which rule the card came from");
     if (platform === "slack") {
       assert.match(received[0].text, /正文/);
       assert.equal(received[0].mrkdwn, false);

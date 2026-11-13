@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { DeliveryIO } from "./delivery.ts";
 import { question } from "./input.ts";
 
 const retryKey = "delivery-retry";
@@ -9,7 +10,7 @@ const acknowledgeWithin = 180_000;
 type Label = { name: string };
 type Status = { state: string; description: string; created_at: string };
 type Timer = { key: string; about?: string; at?: string };
-type RetryState = { head: string; github: number; execution: number };
+type RetryState = { head: string; github: number; execution: number; checkAfter?: number };
 
 export const hasLabel = (issue: { labels: Label[] }, name: string) => issue.labels.some((label) => label.name === name);
 
@@ -22,16 +23,22 @@ export function unattendedFailure(labels: Label[], last: Status | undefined, now
   );
 }
 
-function retryState(timers: Timer[]): RetryState | undefined {
+export function retryState(timers: Timer[]): RetryState | undefined {
   const saved = timers.find((timer) => timer.key === retryKey)?.about;
   return saved ? JSON.parse(saved) : undefined;
 }
 
-export const retryHead = (timers: Timer[]) => retryState(timers)?.head ?? "";
-
-export function retryHandoff(timers: Timer[], head: string, hiccup: boolean, now = Date.now(), canReturn = true) {
+export function retryHandoff(
+  timers: Timer[],
+  head: string,
+  hiccup: boolean,
+  now = Date.now(),
+  canReturn = true,
+  checkRecovery?: DeliveryIO["checkRecovery"],
+) {
   const previous = retryState(timers);
   const count = previous?.head === head ? previous : { head, github: 0, execution: 0 };
+  if (checkRecovery?.head === head) count.checkAfter = checkRecovery.after;
   const kind = hiccup ? "github" : "execution";
   const limit = hiccup ? 60 : 5;
   count[kind] = Math.min(count[kind] + 1, limit);

@@ -49,9 +49,11 @@ test("website outage wakes once while its card is open, recovery closes only tha
   assert.equal(first.notice?.length, 1);
   const pending = {
     ...empty,
+    // The unrelated card comes first: a receipt that resolves whatever card is first, instead of the one whose
+    // title names this site, closes the wrong one.
     open: [
-      { card: 7, title: first.notice![0].title },
       { card: 8, title: "另一网站异常" },
+      { card: 7, title: first.notice![0].title },
     ],
   };
   assert.deepEqual(receipt(target, { ok: false, reason: "返回 503" }, pending), {});

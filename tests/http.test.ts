@@ -304,6 +304,7 @@ test("a card's link is a plain page: it shows that card as words, runs nothing, 
   assert.match(page.headers.get("content-type")!, /^text\/html/);
   assert.ok(!/<script|<b>|<i>/.test(page.text), page.text);
   assert.ok(page.text.includes("&lt;script&gt;alert(1)&lt;/script&gt;链接答"));
+  assert.match(page.text, /<p class="from">来源：[^<]+<\/p>/, "the page says which rule the card came from");
   assert.match(page.headers.get("content-security-policy")!, /default-src 'none'/);
   assert.equal(page.headers.get("referrer-policy"), "no-referrer");
   assert.equal(page.headers.get("cache-control"), "no-store");

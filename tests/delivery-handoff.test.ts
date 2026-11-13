@@ -1,4 +1,4 @@
-// A retry cannot inherit another head's errors or notify an owner who still has an agent waiting for the result.
+// A retry cannot inherit another head's errors, forget its one check restart, or notify an owner whose agent is waiting.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { unattendedFailure, retryHandoff } from "../plugins/delivery/handoff.ts";
@@ -15,6 +15,16 @@ test("GitHub errors get an hour without using up the five regular retries", () =
   const unreachable = retryHandoff([due], head, true, now, false);
   assert.deepEqual(JSON.parse(unreachable!.about), { head, github: 60, execution: 3 });
   assert.deepEqual(JSON.parse(retryHandoff([due], "b".repeat(40), true, now)!.about).github, 1);
+});
+
+test("the retry receipt keeps a check restart across errors and drops it for a new head", () => {
+  const recovery = { head, after: 12 };
+  const first = retryHandoff([], head, false, now, true, recovery)!;
+  assert.deepEqual(JSON.parse(first.about), { head, github: 0, execution: 1, checkAfter: 12 });
+  const second = retryHandoff([first], head, true, now)!;
+  assert.deepEqual(JSON.parse(second.about), { head, github: 1, execution: 1, checkAfter: 12 });
+  const changed = retryHandoff([second], "b".repeat(40), false, now, true, recovery)!;
+  assert.deepEqual(JSON.parse(changed.about), { head: "b".repeat(40), github: 0, execution: 1 });
 });
 
 test("an attended return is eligible for notice only after three minutes and without a fresh handoff", () => {

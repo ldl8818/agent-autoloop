@@ -63,7 +63,7 @@ function stylesFor(color: boolean) {
 }
 
 /** Times as a person reads them, in the hub's time zone, counted from the hub's now. */
-function clockFor(state: any) {
+export function clockFor(state: { now: string; timezone: string }) {
   const zone = state.timezone;
   const now = Date.parse(state.now);
   const dayOf = (at: number) => {
@@ -88,6 +88,29 @@ function clockFor(state: any) {
     return minutes < 60 ? `${minutes} 分钟` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
   };
   return { when, lasted };
+}
+
+// A word both sh and PowerShell take as it is: # starts a comment and @ a splat only at the front of a word.
+const PLAIN = /^[\p{L}\p{N}_./][\p{L}\p{N}_.#@:/-]*$/u;
+
+/** A word the user's shell reads back unchanged: single quotes, which neither expands inside, as each shell escapes them.
+ * PowerShell also takes the curly single quotes (common in Chinese text) as quotes, so each of those is doubled too. */
+const shellWord = (word: string, windows: boolean) =>
+  PLAIN.test(word)
+    ? word
+    : windows
+      ? `'${word.replace(/['\u2018\u2019\u201a\u201b]/g, "$&$&")}'`
+      : `'${word.replaceAll("'", `'\\''`)}'`;
+
+/** The command that hands a rule what its pause skipped since then, to copy as it is into this machine's shell. */
+export const replayCommand = (rule: string, since: string, windows = process.platform === "win32") =>
+  `agent-autoloop replay ${shellWord(rule, windows)} --since ${shellWord(since, windows)}`;
+
+/** One event a pause skipped, in a line no wider than `room`: when it came, from where, what and about what. */
+export function skippedLine(event: any, room: number, when: (iso: string) => string, from = (id: string) => id) {
+  const head = `${when(event.receivedAt)}  `;
+  const what = `${from(event.source)} ${event.type} ${event.subject}${event.summary ? `：${event.summary}` : ""}`;
+  return head + wrap(what, room - width(head), 1)[0];
 }
 
 /** A finished run is no longer going or waiting to go. */
@@ -169,15 +192,28 @@ export function render(state: any, { color, columns }: { color: boolean; columns
       );
   }
 
+  const sourceName = (id: string) => state.sources.find((one: any) => one.id === id)?.name ?? id;
   const paused = state.lines.filter((line: any) => line.paused);
   if (paused.length) section(`${heading("暂停中")}${dim("（恢复：agent-autoloop resume <规则>）")}`);
-  for (const line of paused) say(`  ${line.name}${line.paused.reason ? dim(`：${line.paused.reason}`) : ""}`);
+  for (const line of paused) {
+    const { reason, since, until, skipped } = line.paused;
+    say(`  ${line.name}${reason ? dim(`：${reason}`) : ""}`);
+    // A schedule lets its moments pass and keeps no events, so it has no count.
+    const ends = until ? `，${when(until)} 自动恢复` : "";
+    say(dim(`    ${when(since)} 起${ends}${skipped ? `，跳过 ${skipped.count} 条事件` : ""}`));
+    const shown = skipped?.events.slice(0, 5) ?? [];
+    for (const event of shown) say(`      ${skippedLine(event, room - 6, when, sourceName)}`);
+    if (shown.length < (skipped?.count ?? 0)) say(dim(`      共 ${skipped.count} 条，这里列出最近 ${shown.length} 条`));
+    // Nobody reads anything when a pause ends by itself, so the way to replay is told while it lasts.
+    if (until && skipped?.count) say(dim(`    到时不会列出这些事件，之后补跑：${replayCommand(line.name, since)}`));
+  }
 
   const INDENT = "       ";
   if (state.cards.length) section(bold(yellow(`等你 ${state.cards.length}`)));
   for (const card of state.cards) {
     const label = card.kind === "ask" ? bold(yellow("决定")) : bold(magenta("留意"));
     say(`  ${label} ${dim(`#${card.id}`)} ${bold(card.title)}`);
+    if (card.rule && card.rule !== card.title) say(dim(`${INDENT}来源：${card.rule}`));
     for (const paragraph of (card.text ?? "").split(/\n\s*\n/).filter((one: string) => one.trim())) {
       for (const line of wrap(unlinked(paragraph), room - INDENT.length)) say(INDENT + line);
       for (const [, words, url] of paragraph.matchAll(LINK)) say(`${INDENT}${underline(words)} ${dim(url)}`);
@@ -190,7 +226,6 @@ export function render(state: any, { color, columns }: { color: boolean; columns
     } else say(dim(`${INDENT}处理完了：agent-autoloop answer ${card.id}`));
   }
 
-  const sourceName = (id: string) => state.sources.find((one: any) => one.id === id)?.name ?? id;
   const because = (event: { source: string; type: string; subject: string; summary: string }) => {
     if (event.type === "card.answered") return `你回答了卡片「${event.summary}」`;
     if (event.type === "schedule.tick") return "到点了";

@@ -25,6 +25,15 @@ function describeEvent({ sourceName, type, subject, link }: Job["context"]["even
   return `- ${`${sourceName} ${type} ${subject}`.trim()}${link ? `（${link}）` : ""}`;
 }
 
+/** The rule's session title: {subject} is the one subject this run's events share, {id} its last part. */
+function titleOf({ rule, context }: Job) {
+  if (!rule.title) return [];
+  const subjects = unique(context.events.map((event) => event.subject).filter(Boolean));
+  const subject = subjects.length === 1 ? subjects[0] : "";
+  const id = subject.split(/[/#:]/).at(-1)!;
+  return [rule.title.replaceAll("{subject}", subject).replaceAll("{id}", id)];
+}
+
 export function promptFor(job: Job, contextFile: string) {
   const { rule, context, askFirst, session } = job;
   // A session carried on has the skill it read before in its history, and goes by that copy unless told it may be stale.
@@ -39,6 +48,7 @@ export function promptFor(job: Job, contextFile: string) {
       `"subject":"对象","summary":"一句话","link":"网址"}]`
     : "";
   return [
+    ...titleOf(job),
     `Agent 自动化中台按规则「${rule.name}」把这件活派给你。发生了：`,
     ...(happened.length ? happened : ["- 定时到了"]),
     "",

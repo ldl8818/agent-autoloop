@@ -32,6 +32,12 @@ const isId: Check = (value) => typeof value === "string" && ID.test(value);
 const isCount: Check = (value) => Number.isInteger(value) && (value as number) > 0;
 const isTypes: Check = (value) => isSomeWords(value) && (value as string[]).every((type) => TYPE_PATTERN.test(type));
 const isCron: Check = (value) => typeof value === "string" && parseCron(value) !== null;
+// One word, as a client may name a session after the first word of its first message. It leads the prompt, which goes to
+// the Agent's command line as an argument: started with a subject from outside it could be read as an option or command.
+const isTitle: Check = (value) =>
+  typeof value === "string" &&
+  /^[\p{L}\p{N}]\S*$/u.test(value) &&
+  !/[{}]/.test(value.replaceAll("{id}", "").replaceAll("{subject}", ""));
 const isFolder: Check = (value) =>
   typeof value === "string" && /^(~[/\\]|\/|[a-z]:[/\\]|\\\\[^\\]+\\[^\\]+)/i.test(value);
 const FOLDER = "要是绝对目录（如 ~/code、/srv/app、C:\\code 或 \\\\服务器\\共享目录）";
@@ -77,6 +83,7 @@ function checkRule(issues: string[], rules: Rules, rule: Rule, names: Set<string
     ["cwd", isFolder, FOLDER],
     ["skill", isText, NOT_EMPTY, true],
     ["prompt", isText, NOT_EMPTY, true],
+    ["title", isTitle, "要是字母或数字开头、不含空白的一个词，占位符只能用 {id}、{subject}", true],
     ["group", isText, NOT_EMPTY, true],
     ["parallel", isCount, "要是正整数", true],
     ["maxActive", isCount, "要是正整数", true],
@@ -195,6 +202,8 @@ export function parseRules(json: string, now: number, timezone: string): Rules {
       ["to", isKeyOf(rules.agents), "不是已登记的 Agent"],
       ["cron", isCron, "不是有效的 cron"],
       ["where", isText, NOT_EMPTY],
+      ["model", isText, NOT_EMPTY, true],
+      ["effort", isText, NOT_EMPTY, true],
       ["cwd", isFolder, FOLDER, true],
       ["skill", isText, NOT_EMPTY, true],
       ["prompt", isText, NOT_EMPTY, true],

@@ -61,6 +61,8 @@ export function hubClient(url: string, key: string) {
     resume: (rule: string) => call("POST", `/v1/rules/${encodeURIComponent(rule)}/resume`, { body: {} }),
     run: (rule: string, body: { subject?: string; reason?: string } = {}) =>
       call("POST", `/v1/rules/${encodeURIComponent(rule)}/run`, { body }),
+    replay: (rule: string, body: { since: string }) =>
+      call("POST", `/v1/rules/${encodeURIComponent(rule)}/replay`, { body }),
   };
 }
 export type Hub = ReturnType<typeof hubClient>;

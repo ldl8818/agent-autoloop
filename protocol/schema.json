@@ -443,6 +443,9 @@
             "prompt": {
               "type": "string"
             },
+            "title": {
+              "type": "string"
+            },
             "emits": {
               "type": "object",
               "properties": {

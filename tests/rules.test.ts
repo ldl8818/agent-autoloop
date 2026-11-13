@@ -7,7 +7,10 @@
 // an ACP agent like that which no rule uses and which never hurt anyone being refused; a rule with neither a skill nor a
 // prompt, or without a folder; a misspelt field taken silently; a rule running more than one at a time without saying how many, or
 // rules in one group disagreeing on it; an emit naming a source that isn't there; a rule's channels naming one that isn't there, or none at all; defaultChannels naming one that isn't there, or none at all; a scheduled task shown on the page naming a source or agent that isn't there or a malformed schedule, or saying how its answers go on without where (cwd), or where without how; a time zone
-// that doesn't exist; the reserved source redefined; a null rule crashes reload instead of keeping the old rules.
+// that doesn't exist; a session title with a space, which a client taking the first word would cut, with a placeholder
+// it doesn't know, which would reach the Agent as written, or not starting with a letter or digit, so a subject from
+// outside can lead the prompt and be read by the Agent's command line as an option (-x) or a command (/x); the reserved source redefined; a null rule crashes reload instead of keeping the old rules;
+// a task elsewhere that can't say which model its app runs it on, so a client showing it borrows the Agent's, or one that says so with an empty word.
 // A good file changing on disk takes effect; a bad one doesn't, and says why. A file that is gone or can't be read
 // crashes the hub, at reload or at restart, instead of keeping the rules it had. A file broken while the hub was down
 // is never told, because nothing about it changes after startup has read it.
@@ -36,6 +39,13 @@ const problem = (change: (r: any) => void, words: RegExp) => {
   );
 };
 
+test("a task elsewhere may say which model and effort its app runs it on", () => {
+  const told = good();
+  Object.assign(told.elsewhere[0], { model: "some-model", effort: "high" });
+  const [task] = parseRules(JSON.stringify(told)).elsewhere;
+  assert.deepEqual([task.model, task.effort], ["some-model", "high"]);
+});
+
 test("the fixture loads, with defaults filled in", () => {
   const r = parseRules(JSON.stringify(good()));
   assert.equal(r.rules[0].tell, "needed");
@@ -52,6 +62,8 @@ test("the fixture loads, with defaults filled in", () => {
   const limited = parseRules(JSON.stringify(wrapped));
   assert.equal(limited.agents.a1.maxActive, 3);
   assert.equal(limited.rules[0].maxActive, 1);
+  assert.equal(r.rules[0].title, "note-{id}");
+  assert.equal(r.rules[1].title, undefined, "no title unless the rule gives one");
 });
 
 test("a mistake says which rule and what is wrong", () => {
@@ -121,6 +133,20 @@ test("a mistake says which rule and what is wrong", () => {
     r.rules[0].resume = "thread";
   }, /规则「意见」.*resume/);
   problem((r) => {
+    r.rules[0].title = "";
+  }, /规则「意见」.*title/);
+  problem((r) => {
+    r.rules[0].title = "note {id}";
+  }, /规则「意见」.*title.*不含空白/);
+  problem((r) => {
+    r.rules[0].title = "note-{ID}";
+  }, /规则「意见」.*title.*\{id\}、\{subject\}/);
+  for (const title of ["{id}-note", "-note", "/note", "note-{{id}}", "note-{id"]) {
+    problem((r) => {
+      r.rules[0].title = title;
+    }, /规则「意见」.*title.*字母或数字开头/);
+  }
+  problem((r) => {
     r.rules[4].emits.source = "nowhere";
   }, /规则「巡检」.*emits/);
   problem((r) => {
@@ -162,6 +188,12 @@ test("a mistake says which rule and what is wrong", () => {
   problem((r) => {
     r.elsewhere[0].name = "意见";
   }, /定时任务「意见」.*重名/);
+  problem((r) => {
+    r.elsewhere[0].model = "";
+  }, /定时任务「每周清理」.*model/);
+  problem((r) => {
+    r.elsewhere[0].effort = 3;
+  }, /定时任务「每周清理」.*effort/);
   problem((r) => {
     r.elsewhere[0].skill = "weekly";
   }, /定时任务「每周清理」.*cwd/);

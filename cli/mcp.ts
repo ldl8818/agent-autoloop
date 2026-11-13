@@ -24,8 +24,19 @@ const specs = [
     ["id", "type"],
   ],
   ["tell", "用本机来源发送通知；相同编号只发一次", { key: string, text: string }, ["key", "text"]],
-  ["pause", "暂停一条规则：到点不跑、来事件不接", { rule: string, reason: string, until: string }, ["rule"]],
-  ["resume", "恢复一条暂停的规则", { rule: string }, ["rule"]],
+  [
+    "pause",
+    "暂停一条规则：到点不跑、来事件不接也不排队；跳过的事件不会自动补，手动恢复时会列出，之后可以 replay",
+    { rule: string, reason: string, until: string },
+    ["rule"],
+  ],
+  ["resume", "恢复一条暂停的规则，结果里列出暂停期间跳过的事件（paused.skipped）", { rule: string }, ["rule"]],
+  [
+    "replay",
+    "补跑一条规则从 since 起暂停时跳过的事件，每条只补一次；since 用恢复结果里的 paused.since",
+    { rule: string, since: string },
+    ["rule", "since"],
+  ],
   ["run", "立即运行一条规则一轮", { rule: string, subject: string, reason: string }, ["rule"]],
 ] as const;
 
@@ -82,6 +93,8 @@ function callTool(hub: Hub, name: Tool["name"], args: any) {
       });
     case "resume":
       return hub.resume(args.rule);
+    case "replay":
+      return hub.replay(args.rule, { since: args.since });
     case "run":
       return hub.run(args.rule, {
         ...(args.subject !== undefined && { subject: args.subject }),

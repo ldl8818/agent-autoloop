@@ -37,7 +37,7 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 
 支持 `resume` 的插件，从 Agent 收下提示词起都要返回 `started: true`，包括运行中和出错之后。否则干到一半断了，也会被当成会话接不上，开新会话把业务重做一遍。返回了 `session` 就要按 `turn.resume` 接回原会话：没跑成的重派和写错回执的重写都靠它；接不回去的 CLI 不要返回 `session`。
 
-`usage` 是这次启动用掉的量。有的 CLI 只给整个会话累计到现在的数（Codex 的 Token、Claude Code 的费用），这几项放进 `sessionUsage`，同时要返回 `session`。接单程序启动前记下这个会话上次的累计值，结束后相减，和 `usage` 合起来上报；这些记录放在 `~/.agent-autoloop/worker/usage/`，接单程序中途重启也不会多算。
+`usage` 是这次启动用掉的量。`input` 算全部输入，`cached` 是其中从缓存读的部分；CLI 报的输入不含缓存时（Claude Code、DSH 就是这样），插件把缓存读写加回 `input`，各家才能放在一起比。有的 CLI 只给整个会话累计到现在的数（Codex 的 Token、Claude Code 的费用），这几项放进 `sessionUsage`，同时要返回 `session`。接单程序启动前记下这个会话上次的累计值，结束后相减，和 `usage` 合起来上报；这些记录放在 `~/.agent-autoloop/worker/usage/`，接单程序中途重启也不会多算。
 
 没有记录的续接（换了电脑、升级前就有的会话）或累计值变小时，这几项这次不报，不猜；下一次续接恢复正常。其他程序在同一个会话里用掉的量分不出来，比如本人打开链接接着聊，会算进下一次续接。CLI 改成只报单次时，插件要把这几项改回 `usage`，不要靠数字大小去猜。
 
@@ -54,6 +54,8 @@ Windows 原生运行支持 `.exe`/`.com`、PowerShell `.ps1` 和 npm 生成的 `
 只需要打印最后一条消息时，用内置 `command` 加参数数组即可，不必写插件。参数里可以用 `{prompt}`、`{model}`、`{effort}`、`{cwd}`、`{context}`，每个参数只替换一轮，替换进去的提示词原样传给程序：提示词里写着 `{cwd}` 或 `$&`，到程序那边也还是这几个字，不会被再替换一次。每个 Agent 进程（包括内置插件配的 `program` 脚本）都能读到环境变量 `AGENT_AUTOLOOP_CONTEXT`（资料文件）和 `AGENT_AUTOLOOP_RUN`（第几轮）。同一轮重试、重写回执时编号不变；回答和到期的复查是新的一轮，编号不同。
 
 DeepSeek Harness 有内置 `dsh` 插件，规则里写 `use: "dsh"`，要 0.2.2 或更新，`agent-autoloop doctor` 会查。现在 npm 的 `latest` 还是旧版，要这样装：`npm install -g @deepseek-ai/dsh@next --allow-scripts=koffi,node-pty,@deepseek-ai/dsh-subprocess-local`。新版 npm 默认不跑依赖的安装脚本，不放行这三个包，装完看着正常，一跑才出错。从旧版升上来的，0.2.2 可能读不到 `~/.dsh/.credentials.yaml` 里的 `refs`，报 `MISSING_CREDENTIAL`：把密钥放进环境变量，Linux 的系统服务放 `~/.config/environment.d/*.conf`。只上报 Token，不上报费用。有用户在 WSL2 上用 0.2.2-rc.1 和第三方 OpenAI 兼容服务实测跑通了问答、用量和 `resume`。它以 `dsh headless --json` 跑一轮，从 `session` 事件拿会话编号，用 `--session-id` 续接，把 `step_end` 的用量汇总为 Token，`final` 事件才算跑完；`access` 每次都映射成 `--permission-mode`，要人批准的调用用 `--approval-policy never` 直接拒绝。规则里的 `model`、`effort` 不起作用，用 DSH 自己的配置。没有可打开的桌面会话链接。DSH 默认把会话日志上传给 DeepSeek，见[它的说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md)。
+
+ZCode 有内置 `zcode` 插件，规则里写 `use: "zcode"`。它启动随桌面版安装的 CLI，跑 `zcode -p … --json`，一轮结束后打印一个 JSON 对象：从 `sessionId` 取会话编号，`response` 是最后一条消息，`usage` 里的 `inputTokens`、`outputTokens`、`cacheReadTokens` 是这一轮的 Token；下一轮用 `--resume sess_…` 续接。`access` 映射成它自己的模式：`read`→`plan`、`edit`→`edit`、`full`→`yolo`。Windows 上的 CLI 是 `.cjs` 包，Agent 写 `"program": "路径\\zcode.cjs"`，插件会用 node 启动它；写一个别的可执行文件也可以。规则里的 `model`、`effort` 不起作用，模型和提供方由 ZCode 自己的配置决定；CLI 用 `-p` 返回空时，先在 ZCode 里换一个能用的提供方。只上报 Token，不上报费用；没有可打开的桌面会话链接。
 
 ### 浏览器接入
 
@@ -115,9 +117,10 @@ Claude 委托 Codex 的完整规则、Skill 和参数调用脚本见[浏览器�
 | Codex            | `read-only`：能跑 shell，不能写文件，命令默认不能联网            | `workspace-write`：能跑 shell、写工作目录和临时目录，命令默认不能联网        | `danger-full-access`：能写文件、跑 shell、联网，无审批 |
 | Claude Code      | `plan`：能读文件和运行只读命令；其他命令取决于自动审批及本机规则 | `acceptEdits`：再允许目录内文件编辑和常见文件操作；任意 shell 或联网仍需放行 | `bypassPermissions`：跳过工具审批，没有额外系统隔离    |
 | DeepSeek Harness | `read-only`：不能写文件，读文件和联网不受限                      | `workspace-write`：命令和文件改动限于工作目录和临时目录，读文件和联网不受限  | `danger-full-access`：不受限制                         |
+| ZCode            | `plan`：只读规划，不写文件                                       | `edit`：自动应用编辑，shell 命令直接执行                                     | `yolo`：不审批，不受限制                               |
 | ACP              | Agent 来问时，同意读和搜索                                       | 再同意工作目录内的编辑                                                       | 同意它来问的所有操作                                   |
 
-Codex 的三个档位已用插件命令实跑；DeepSeek Harness 和 Claude Code 分别依据 [DSH 文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md)和[官方权限说明](https://code.claude.com/docs/en/permission-modes)整理，没有调用模型实跑。Codex 的命令网络限制与托管搜索、MCP 不是同一个边界，详见[官方沙箱说明](https://learn.chatgpt.com/docs/agent-approvals-security)。用户的 CLI 配置可能改变上述能力；`read` 也不代表读不到本机密钥。
+Codex 的三个档位已用插件命令实跑；ZCode 已用真实 CLI 跑通 `edit` 模式、提问和回答后的会话续接，`plan`、`yolo` 按它的 `--mode` 说明整理；DeepSeek Harness 和 Claude Code 分别依据 [DSH 文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md)和[官方权限说明](https://code.claude.com/docs/en/permission-modes)整理，没有调用模型实跑。Codex 的命令网络限制与托管搜索、MCP 不是同一个边界，详见[官方沙箱说明](https://learn.chatgpt.com/docs/agent-approvals-security)。用户的 CLI 配置可能改变上述能力；`read` 也不代表读不到本机密钥。
 
 ACP 的 `access` 只管 Agent 主动来问的操作。规范允许 Agent 不询问就执行，这种操作 `access` 拦不住，要用 Agent 自己的模式限制，比如 `command` 里写 `env INITIAL_AGENT_MODE=read-only …`。ACP 的 `model`、`effort`、`tier` 不生效，也要在 Agent 自己那边设置。
 

@@ -25,7 +25,7 @@ import {
   untilAnswering,
 } from "../host/service.ts";
 import { versionLine } from "../host/version.ts";
-import { colorFor, render } from "./status.ts";
+import { clockFor, colorFor, render, replayCommand, skippedLine } from "./status.ts";
 import { attemptsOf, newFailure, waitingRetry } from "./try.ts";
 
 const ROOT = path.join(import.meta.dirname, "..");
@@ -50,9 +50,11 @@ const HELP = `Agent 自动化中台
   agent-autoloop check [文件]            检查规则文件，不碰中台；不写文件就查 rules.json
   agent-autoloop rules explain [文件]    按本机 rules.json（或指定草稿）说明生效的规则、Agent、通道和下次定时
   agent-autoloop pause <规则> [--reason 原因] [--until 时间]
-                                    暂停一条规则：到点不跑、来事件不接，直到恢复
+                                    暂停一条规则：到点不跑、来事件不接也不排队，直到恢复
   agent-autoloop resume <规则>
-                                    恢复；错过的时段不补跑
+                                    恢复，列出暂停期间跳过的事件；错过的时段不补跑
+  agent-autoloop replay <规则> --since <时间>
+                                    补跑这条规则从这个时间起暂停时跳过的事件，每条只补一次
   agent-autoloop run <规则> [--subject 对象] [--reason 说明]
                                     立即运行一轮，照常排队派活
   agent-autoloop emit <类型> [--dry-run] [--subject x] [--summary x] [--detail x] [--link x] [--id x] [--key 来源密钥]
@@ -157,6 +159,10 @@ rules.json 里这个定时任务要写 cwd；你答了，中台叫醒它的 Agen
   resolve: { flags: [], usage: "用法：agent-autoloop resolve <卡片> <结果>" },
   restore: { flags: ["yes"], usage: RESTORE_USAGE },
   resume: { flags: [], usage: "用法：agent-autoloop resume <规则>" },
+  replay: {
+    flags: ["since"],
+    usage: "用法：agent-autoloop replay <规则> --since <时间>（恢复时打印的就是这条命令）",
+  },
   rules: { flags: [], usage: "用法：agent-autoloop rules explain [文件]" },
   runs: { flags: ["before", "json"], usage: RUNS_USAGE },
   run: { flags: ["subject", "reason"], usage: "用法：agent-autoloop run <规则> [--subject 对象] [--reason 说明]" },
@@ -526,14 +532,55 @@ async function pause(args: string[]) {
   };
   if (!rest[0]) return fail(TAKES.pause.usage);
   const done = await ownerClient().pause(rest[0], body);
-  console.log(done.changed ? `暂停了「${done.rule}」。` : `「${done.rule}」本来就暂停着。`);
+  const { since, until, skipped } = done.paused;
+  const ends = until ? `，${localClock().when(until)} 自动恢复` : "";
+  const lines = [done.changed ? `暂停了「${done.rule}」${ends}。` : `「${done.rule}」本来就暂停着${ends}。`];
+  // A schedule lets its moments pass and keeps no events.
+  if (skipped === null) lines.push("暂停期间到点不跑，恢复后也不补跑错过的时段。");
+  else if (!until) lines.push("暂停期间来的事件这条规则不接，也不排队等恢复；恢复时会列出这些事件，可以补跑。");
+  // Nobody reads anything when a pause ends by itself, so the way to replay is told now.
+  else
+    lines.push(
+      "暂停期间来的事件这条规则不接，也不排队；到时不会列出，之后补跑：",
+      `  ${replayCommand(done.rule, since)}`,
+    );
+  if (skipped?.count) lines.push(`到现在跳过了 ${skipped.count} 条事件。`);
+  console.log(lines.join("\n"));
 }
+
+/** Times from the hub as they read here, for what answers a command rather than the state. */
+const localClock = () =>
+  clockFor({ now: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 
 async function resume(args: string[]) {
   const { rest } = flags(args);
   if (!rest[0]) return fail(TAKES.resume.usage);
   const done = await ownerClient().resume(rest[0]);
-  console.log(done.changed ? `恢复了「${done.rule}」。` : `「${done.rule}」本来就没暂停。`);
+  if (!done.changed) return console.log(`「${done.rule}」本来就没暂停。`);
+  const { since, skipped } = done.paused ?? {};
+  const { when } = localClock();
+  const lines = [`恢复了「${done.rule}」。`];
+  if (skipped === null) lines[0] += "错过的时段不补跑，从下一个时刻照常跑。";
+  else if (skipped?.count === 0) lines[0] += "暂停期间没有跳过事件。";
+  else if (skipped) {
+    lines[0] += `暂停期间（${when(since)} 起）跳过了 ${skipped.count} 条事件，没有补跑：`;
+    const room = Math.min(process.stdout.columns || 100, 120) - 2;
+    for (const event of skipped.events) lines.push(`  ${skippedLine(event, room, when)}`);
+    if (skipped.count > skipped.events.length) {
+      lines.push(`  共 ${skipped.count} 条，这里列出最近 ${skipped.events.length} 条`);
+    }
+    lines.push(`补跑这 ${skipped.count} 条：${replayCommand(done.rule, since)}`);
+  }
+  console.log(lines.join("\n"));
+}
+
+async function replay(args: string[]) {
+  const { named, rest } = flags(args);
+  const since = text(named.since);
+  if (!rest[0] || !since) return fail(TAKES.replay.usage);
+  const done = await ownerClient().replay(rest[0], { since });
+  if (!done.events.length) return console.log("没有要补跑的事件：这段时间没有跳过的，或者都已经补跑过了。");
+  console.log(`补跑了 ${done.events.length} 条，排上了第 ${done.runs.join("、")} 轮。`);
 }
 
 async function runNow(args: string[]) {
@@ -876,6 +923,7 @@ const commands: Record<string, () => unknown> = {
   rules: () => rulesCommand(args),
   pause: () => pause(args),
   resume: () => resume(args),
+  replay: () => replay(args),
   run: () => runNow(args),
   key: () => key(args),
   emit: () => emit(args),

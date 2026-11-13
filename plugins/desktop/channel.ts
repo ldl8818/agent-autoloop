@@ -90,7 +90,7 @@ export default async function desktop({ hub, log, signal }: ChannelContext) {
       continue;
     }
     try {
-      await show(card.title);
+      await show(card.rule && card.rule !== card.title ? `${card.title}\n来源：${card.rule}` : card.title);
       await hub.delivered(card.id, card.version, `shown-${card.id}`);
     } catch (error) {
       log(`卡片 ${card.id} 的桌面通知没发出：${error}`);

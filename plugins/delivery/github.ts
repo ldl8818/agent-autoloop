@@ -42,9 +42,9 @@ export function gh(args: string[], input?: object) {
 export function github(repo: string) {
   if (!REPO.test(repo)) throw new Error("仓库要写成 owner/name");
   return async (path: string, body?: any, method = body === undefined ? "GET" : "POST") => {
-    const ready = /^pulls\/(\d+)\/ready$/.exec(path);
+    const ready = /^pulls\/(\d+)\/(ready|draft)$/.exec(path);
     if (ready) {
-      gh(["pr", "ready", ready[1], "--repo", repo]);
+      gh(["pr", "ready", ready[1], "--repo", repo, ...(ready[2] === "draft" ? ["--undo"] : [])]);
       return {};
     }
     const text = gh(
@@ -118,6 +118,7 @@ export function createIO(repo: string, folder: string, options: DeliveryOptions 
     verifyReview,
     reviewStatus: options.reviewStatus,
     report: options.report,
+    now: Date.now,
     ...(options.autoMerge && {
       async enableAuto(pr: any) {
         gh([

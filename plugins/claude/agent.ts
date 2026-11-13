@@ -72,11 +72,15 @@ export default {
         ? known
         : { ...known, error: tail(stderr || (messages.length ? "" : stdout)) || "没留下结果" };
     }
+    // Its input_tokens leave out what was read from or written to the cache; `input` counts all of it, as Codex's does.
     const usage = result.usage
       ? {
-          input: result.usage.input_tokens ?? 0,
+          input:
+            (result.usage.input_tokens ?? 0) +
+            (result.usage.cache_read_input_tokens ?? 0) +
+            (result.usage.cache_creation_input_tokens ?? 0),
           output: result.usage.output_tokens ?? 0,
-          cached: (result.usage.cache_read_input_tokens ?? 0) + (result.usage.cache_creation_input_tokens ?? 0),
+          cached: result.usage.cache_read_input_tokens ?? 0,
         }
       : undefined;
     // Resumed, it goes on counting the price from the session so far, though its tokens start again.

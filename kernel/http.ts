@@ -2,8 +2,9 @@
 import { cardPage, PAGE_HEADERS, wordsPage } from "./card-page.ts";
 import { whose, type Environment } from "./credentials.ts";
 import { AuthError, Conflict, InputError, NotFound } from "./errors.ts";
-import type { Row, View } from "./evolve.ts";
+import { iso, type Row, type View } from "./evolve.ts";
 import { agentsOf, cancels, cardView, configuration, eventOutcome } from "./query.ts";
+import { eventRule, ruleOf } from "./rules.ts";
 import { isAsk } from "../protocol/validate.ts";
 
 export type Services = {
@@ -13,6 +14,9 @@ export type Services = {
   commit: string;
   dispatch(type: string, args: any[], now: number): any;
   state(now: number, before?: number): unknown;
+  /** What a pause has kept from a rule since it began and nothing has made up yet, newest first: how many, and the
+   * latest of them, or all of them. */
+  skipped(rule: string, since: string, everything?: boolean): { count: number; events: Row[] };
   why(id: number): unknown;
   card(token: string): Row | undefined;
   wait(until: number, signal: AbortSignal): Promise<void>;
@@ -206,10 +210,20 @@ async function cardAction(call: Call, id: number, action: string) {
   return json({ ok: true });
 }
 
-const CONTROL_FIELDS: Record<string, string[]> = { pause: ["reason", "until"], resume: [], run: ["subject", "reason"] };
-const CONTROL_INPUTS: Record<string, string> = { pause: "pauseRule", resume: "resumeRule", run: "runRule" };
+const CONTROL_FIELDS: Record<string, string[]> = {
+  pause: ["reason", "until"],
+  resume: [],
+  run: ["subject", "reason"],
+  replay: ["since"],
+};
+const CONTROL_INPUTS: Record<string, string> = {
+  pause: "pauseRule",
+  resume: "resumeRule",
+  run: "runRule",
+  replay: "replayRule",
+};
 
-/** Pause, resume or run a rule now: the owner's, kept in the log. */
+/** Pause, resume, run a rule now, or replay what its pause skipped: the owner's, kept in the log. */
 async function control(call: Call, encoded: string, action: string) {
   const holder = requireKey(call, "owner");
   let name: string;
@@ -229,7 +243,21 @@ async function control(call: Call, encoded: string, action: string) {
   const unknown = Object.keys(given).filter((field) => !CONTROL_FIELDS[action].includes(field));
   if (unknown.length) throw new InputError(`不认识的字段：${unknown.join("、")}`);
   const type = CONTROL_INPUTS[action];
-  return json(action === "resume" ? act(call, type, name) : act(call, type, name, holder, given));
+  if (action === "replay") {
+    const { since } = given as Row;
+    const from = typeof since === "string" && /(Z|[+-]\d\d:\d\d)$/.test(since) ? Date.parse(since) : NaN;
+    if (!Number.isFinite(from)) throw new InputError("since 要是带时区的 ISO 时间：补跑从这个时间起暂停时跳过的事件");
+    // Picked out here and checked again as they're taken, so what another replay took in between isn't taken twice.
+    const events = call.services.skipped(name, iso(from), true).events.map((event) => event.id);
+    return json(act(call, type, name, events));
+  }
+  const done = action === "resume" ? act(call, type, name) : act(call, type, name, holder, given);
+  if (!done.paused) return json(done);
+  // A schedule lets its moments pass and keeps no events. Read once a resume has lifted the pause, the list is whole:
+  // nothing can join it any more.
+  const rule = ruleOf(call.rules, name);
+  const skipped = rule && !eventRule(rule) ? null : call.services.skipped(name, done.paused.since);
+  return json({ ...done, paused: { ...done.paused, skipped } });
 }
 
 function state(call: Call) {
@@ -296,7 +324,7 @@ async function route(call: Call): Promise<Response> {
   if (method === "GET" && path === "/v1/cards/next") return nextCard(call);
   const card = /^\/v1\/cards\/([1-9][0-9]*)\/(delivered|failed|answer|resolve)$/.exec(path);
   if (method === "POST" && card) return cardAction(call, Number(card[1]), card[2]);
-  const ruleControl = /^\/v1\/rules\/([^/]+)\/(pause|resume|run)$/.exec(path);
+  const ruleControl = /^\/v1\/rules\/([^/]+)\/(pause|resume|run|replay)$/.exec(path);
   if (method === "POST" && ruleControl) return control(call, ruleControl[1], ruleControl[2]);
   if (method === "GET" && path === "/v1/state") return state(call);
   if (method === "GET" && path === "/v1/stream") return stream(call);

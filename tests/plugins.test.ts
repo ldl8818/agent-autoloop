@@ -14,6 +14,7 @@ test("all built-in kinds use the same loader and external plugins take precedenc
     ["command", "agent"],
     ["acp", "agent"],
     ["dsh", "agent"],
+    ["zcode", "agent"],
     ["feishu", "channel"],
     ["webhook", "channel"],
     ["github", "source"],

@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { createIO, gh, isGitHubHiccup, type DeliveryOptions } from "./github.ts";
 import { deliver, DeliveryRefusal, DeliverySuperseded, disableAuto, status, type DeliveryIO } from "./delivery.ts";
 import { deliveryReceipt, question, receiptBlock, subjectNumber } from "./input.ts";
-import { hasLabel, retryHandoff, retryHead, runHook, tellQuestion, tellReturn, unattendedFailure } from "./handoff.ts";
+import { hasLabel, retryHandoff, retryState, runHook, tellQuestion, tellReturn, unattendedFailure } from "./handoff.ts";
 
 type Options = DeliveryOptions & { progressCommand?: string; notifyCommand?: string; direct?: boolean };
 type Context = Parameters<typeof subjectNumber>[1] & {
@@ -25,7 +25,9 @@ async function handoff(
   testLocalHealth: boolean,
 ): Promise<HandoffResult> {
   const timers = context.timers ?? [];
-  let head = retryHead(timers);
+  const previous = retryState(timers);
+  let head = previous?.head ?? "";
+  if (previous?.checkAfter !== undefined) io.checkRecovery = { head, after: previous.checkAfter };
   let pr: any;
   const notify = options.notifyCommand;
   const sendBack = async (reason: string, detail: string): Promise<HandoffResult> => {
@@ -51,6 +53,7 @@ async function handoff(
     }
     pr = await io.api(`pulls/${number}`);
     head = pr.head.sha;
+    if (io.checkRecovery?.head !== head) io.checkRecovery = undefined;
     if (!hasLabel(pr, "deliver")) {
       if (notify && hasLabel(pr, "deliver-attended")) {
         const { statuses } = await io.api(`commits/${head}/status?per_page=100`);
@@ -85,9 +88,17 @@ async function handoff(
         error = writeError;
       }
     }
+    head = io.checkRecovery?.head ?? head;
     const hiccup = isGitHubHiccup(error);
     const canReturn = !!pr && hasLabel(pr, "deliver");
-    const retry = retryHandoff(timers, head, hiccup, Date.now(), canReturn || options.direct === true);
+    const retry = retryHandoff(
+      timers,
+      head,
+      hiccup,
+      Date.now(),
+      canReturn || options.direct === true,
+      io.checkRecovery,
+    );
     if (retry) {
       if (head) await io.report?.("retrying", head, { detail: hiccup ? "github" : "execution" });
       return { text: hiccup ? "GitHub 暂时出错，一分钟后接着查" : "交付步骤暂时出错，一分钟后接着查", retry };
@@ -100,7 +111,7 @@ async function handoff(
       );
     } catch {
       if (options.direct) return { text: "暂时写不回交付结果，请稍后重交", exit: 2 };
-      const retry = retryHandoff(timers, head, hiccup, Date.now(), false)!;
+      const retry = retryHandoff(timers, head, hiccup, Date.now(), false, io.checkRecovery)!;
       return { text: "暂时写不回交付结果，一分钟后接着查", retry };
     }
   }

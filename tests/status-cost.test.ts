@@ -2,7 +2,8 @@
 // machine's or UTC's day and not the rules' time zone; a price nobody reported is counted as zero, or rounds that didn't report
 // are passed over in silence; a round that never started is counted, or one that's only waiting to try again; a week's worth
 // of rounds is cut off at the first page of 60, or a run stuck in the queue since long ago ends the paging early.
-// A run created before the reporting window can finish today behind many old completed runs.
+// A run created before the reporting window can finish today behind many old completed runs. Tokens read from a cache, a
+// small part of the price, aren't told apart, so a day mostly served from cache reads as many times what it cost.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -40,7 +41,7 @@ function spendLine(
 
 test("today is the rules' day; each figure says how many rounds didn't report it", () => {
   const runs = [
-    ended("2026-11-03T01:00:00Z", { input: 5000, output: 5000 }),
+    ended("2026-11-03T01:00:00Z", { input: 5000, output: 5000, cached: 4000 }),
     ended("2026-11-03T00:30:00Z", null),
     // 01:00 on the 3rd in Shanghai: today there, though it's still the 2nd in UTC.
     ended("2026-11-02T17:00:00Z", { input: 1000, output: 234, cost: 0.5 }),
@@ -52,8 +53,17 @@ test("today is the rules' day; each figure says how many rounds didn't report it
   ];
   assert.equal(
     spendLine(runs, now, "Asia/Shanghai"),
-    "今天      3 轮 · 1.1 万 Token（1 轮没上报） · $0.50（2 轮没上报）\n" +
-      "最近 7 天 5 轮 · 2.1 万 Token（1 轮没上报） · $1.50（2 轮没上报）",
+    "今天      3 轮 · 1.1 万 Token（其中缓存 36%；1 轮没上报） · $0.50（2 轮没上报）\n" +
+      "最近 7 天 5 轮 · 2.1 万 Token（其中缓存 19%；1 轮没上报） · $1.50（2 轮没上报）",
+  );
+});
+
+test("rounds recorded before input counted the cache don't show a share of more than all of it", () => {
+  // Claude's input once left its cache out while cached took in reads and writes.
+  const old = [ended("2026-11-03T01:00:00Z", { input: 10, output: 2, cached: 60000 })];
+  assert.equal(
+    spendLine(old, now, "Asia/Shanghai"),
+    "今天      1 轮 · 12 Token · 费用没上报\n最近 7 天 1 轮 · 12 Token · 费用没上报",
   );
 });
 

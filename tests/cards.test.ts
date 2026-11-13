@@ -3,7 +3,8 @@
 // more words or a longer reference than the protocol allows, counts twice,
 // or beats a resolve that came first (only one may change an open card); an answer from someone not on the channel's list,
 // or on a message that isn't the one sent, counts; an answer doesn't wake the thread that asked, wakes another thread, is
-// lost because its run was merged, or doesn't carry the session and what the asker left for itself; the card doesn't show
+// lost because its run was merged, or doesn't carry the session, the rule's session title and what the asker left for
+// itself; the card doesn't show
 // what was done once its run finishes; a run resolves a card outside what it was given to check, or a bad id spoils its own
 // result; resolving wakes nobody. Delivery: a channel gets a card it has, gets none it should, loses a report and sends a second
 // message (the ref sticks, and a stale report doesn't undo a newer one); a stale failure delays a newer version; a failed
@@ -100,6 +101,7 @@ test("an answer wakes the thread that asked, in its session, with what it left f
   assert.equal(card(id).state, "decided");
   const job = claim("w1", at(2))!;
   assert.equal(job.rule.name, "意见");
+  assert.equal(job.rule.title, "note-{id}", "the rule's session title goes to the worker as written");
   assert.equal(job.session, "s-1");
   assert.deepEqual(
     job.context.events.map((e) => [e.type, e.subject]),

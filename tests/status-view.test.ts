@@ -2,9 +2,14 @@
 // Agent reading the output, or show up despite NO_COLOR; a Chinese, Japanese or Korean character is counted as one column,
 // so columns after it drift and lines wrap past the edge; what waits for the owner sinks below what only reports; a
 // notice dealt with spreads its whole text over the list, or loses it, though that's the only place what `tell` said is read.
+// A paused rule doesn't say how many events it has let go by since when, which ones, or that there are more than it lists,
+// or prints one of them wider than the terminal.
+// The replay command it prints, copied as it is, runs something else: a rule name with $ or a backquote expands, one
+// starting with # turns the rest of the line into a comment.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { colorFor, render, width } from "../cli/status.ts";
+import { execFileSync } from "node:child_process";
+import { colorFor, render, replayCommand, width } from "../cli/status.ts";
 
 const now = "2026-11-07T02:00:00.000Z"; // 10:00 in Asia/Shanghai
 const run = (id: number, state: string, rule: string, more: object = {}) => ({
@@ -25,8 +30,8 @@ const state = {
   now,
   timezone: "Asia/Shanghai",
   spending: {
-    today: { rounds: 0, tokens: 0, cost: 0, missingTokens: 0, missingCost: 0 },
-    week: { rounds: 0, tokens: 0, cost: 0, missingTokens: 0, missingCost: 0 },
+    today: { rounds: 0, tokens: 0, cached: 0, cost: 0, missingTokens: 0, missingCost: 0 },
+    week: { rounds: 0, tokens: 0, cached: 0, cost: 0, missingTokens: 0, missingCost: 0 },
   },
   totals: { running: 1, queued: 0, retrying: 0, unknown: 0, doneToday: 1 },
   agents: [{ name: "Claude", worker: "m4", online: false, seenAt: "2026-11-06T13:00:00.000Z" }],
@@ -107,4 +112,95 @@ test("what waits for the owner comes first, then what's going on, then what only
   assert.doesNotMatch(text, /第二段/);
   assert.match(text, /https:\/\/example\.com\/x/);
   assert.doesNotMatch(text, /\]\(/, "a link shows as its words and its address, not markdown");
+});
+
+test("a paused rule says since when, how many events it has skipped, the latest of them, and that there are more", () => {
+  const event = (n: number) => ({
+    id: 100 + n,
+    source: "app",
+    type: "feedback.new",
+    subject: `#${n}`,
+    summary: `第 ${n} 条`,
+    receivedAt: `2026-11-07T01:0${n}:00.000Z`,
+  });
+  const pause = { by: "owner", until: null };
+  const lines = [
+    {
+      name: "意见",
+      every: null,
+      next: null,
+      paused: {
+        ...pause,
+        reason: "下游在修",
+        since: "2026-11-06T10:00:00.000Z",
+        skipped: { count: 7, events: [7, 6, 5, 4, 3, 2, 1].map(event) },
+      },
+    },
+    {
+      name: "早报",
+      every: "每天 9:00",
+      next: "2026-11-08T01:00:00.000Z",
+      paused: { ...pause, reason: "放假", since: "2026-11-07T00:00:00.000Z", skipped: null },
+    },
+  ];
+  const text = render({ ...state, lines }, { color: false, columns: 100 });
+  const start = text.indexOf("暂停中");
+  const section = text.slice(start, text.indexOf("\n\n", start));
+  assert.match(section, /意见：下游在修\n {4}昨天 18:00 起，跳过 7 条事件/);
+  assert.deepEqual(
+    [...section.matchAll(/09:0\d +应用 feedback\.new #(\d)：第 \d 条/g)].map((match) => match[1]),
+    ["7", "6", "5", "4", "3"],
+  );
+  assert.match(section, /共 7 条，这里列出最近 5 条/);
+  assert.match(section, /早报：放假\n {4}08:00 起$/);
+  // A skipped event's line keeps to the width too, cut with "…": its summary can be longer than the terminal.
+  const wide = render(
+    {
+      ...state,
+      lines: [
+        {
+          ...lines[0],
+          paused: {
+            ...lines[0].paused,
+            skipped: { count: 1, events: [{ ...event(7), summary: "很长的一句话".repeat(12) }] },
+          },
+        },
+      ],
+    },
+    { color: false, columns: 100 },
+  );
+  const shown = wide.split("\n").find((one) => one.includes("feedback.new"))!;
+  assert.ok(width(shown) <= 100, shown);
+  assert.match(shown, /…$/);
+});
+
+const since = "2026-11-11T14:07:53.620Z";
+const odd = ["意见 $HOME `id`", "#99 意见", "@x", "it's", "a b", "‘羊毛’ ’"];
+
+test(
+  "the replay command reads back the rule name and time unchanged in sh, and a plain name stays unquoted",
+  { skip: process.platform === "win32" },
+  () => {
+    assert.equal(replayCommand("中台意见", since, false), `agent-autoloop replay 中台意见 --since ${since}`);
+    for (const rule of odd) {
+      const command = replayCommand(rule, since, false);
+      const args = execFileSync(
+        "sh",
+        ["-c", `set -- ${command.replace(/^agent-autoloop replay /, "")}; printf '%s\\n' "$@"`],
+        { encoding: "utf8" },
+      );
+      assert.equal(args, `${rule}\n--since\n${since}\n`, command);
+    }
+  },
+);
+
+test("on Windows the replay command quotes the way PowerShell reads single quotes", () => {
+  assert.equal(replayCommand("中台意见", since, true), `agent-autoloop replay 中台意见 --since ${since}`);
+  assert.equal(replayCommand("it's $x", since, true), `agent-autoloop replay 'it''s $x' --since ${since}`);
+  assert.equal(replayCommand("#99", since, true), `agent-autoloop replay '#99' --since ${since}`);
+  assert.equal(replayCommand("@x", since, true), `agent-autoloop replay '@x' --since ${since}`);
+  // PowerShell takes the curly single quotes as its own: each is doubled like the straight one, or a Chinese name ends the quote.
+  assert.equal(replayCommand("O’Reilly", since, true), `agent-autoloop replay 'O’’Reilly' --since ${since}`);
+  assert.equal(replayCommand("‘羊毛’; rm x", since, true), `agent-autoloop replay '‘‘羊毛’’; rm x' --since ${since}`);
+  assert.equal(replayCommand("‚a‛", since, true), `agent-autoloop replay '‚‚a‛‛' --since ${since}`);
 });

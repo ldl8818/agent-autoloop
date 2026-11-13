@@ -8,6 +8,7 @@ const STYLE = `:root{color-scheme:light dark;font:16px/1.6 system-ui,sans-serif}
 body{max-width:34rem;margin:0 auto;padding:32px 16px;overflow-wrap:anywhere}
 h1{font-size:1.25rem;line-height:1.4;margin:0 0 12px}
 p{white-space:pre-wrap;margin:0 0 20px}
+.from{margin:-8px 0 16px;color:GrayText;font-size:.875rem}
 form{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
 button,input{font:inherit;min-height:44px;border-radius:8px;border:1px solid GrayText;padding:0 16px;\
 background:Canvas;color:CanvasText}
@@ -38,7 +39,8 @@ const shell = (title: string, content: string) =>
 export const wordsPage = (words: string) => shell(words, `<p>${escaped(words)}</p>`);
 
 export function cardPage(card: ReturnType<typeof cardView>) {
-  const words = `<h1>${escaped(card.title)}</h1>${card.text ? `<p>${escaped(card.text)}</p>` : ""}`;
+  const from = card.rule && card.rule !== card.title ? `<p class="from">来源：${escaped(card.rule)}</p>` : "";
+  const words = `<h1>${escaped(card.title)}</h1>${from}${card.text ? `<p>${escaped(card.text)}</p>` : ""}`;
   if (card.state === "open") {
     const focused = card.recommend ?? 0;
     const button = (option: string, index: number) => {
