@@ -14,12 +14,6 @@
   - 下一步：主人在 Codex 正式界面跳过旧问题后核对其他聊天的待输入提示是否消失；不重答中台卡片，不操作客户端私有数据。后续统一使用普通聊天转述与原卡片编号，本次卡片 #38 未另建原生待答框。
   - 分支／worktree：main；/Users/dylan/projects/agent-autoloop。
 
-- 本次临时合并工作区退出后的清理。
-  - 状态：待验证
-  - 接续条件：Codex 将临时工作区视为本聊天主工作区，archive_worktree 明确拒绝移除；原目录不是可由 attach_worktree 重新绑定的受管工作区。当前会话退出前保留，不绕过应用保护删除。
-  - 下一步：本聊天退出或切离该工作区后，从原目录核对无活动会话及进程、859149c 已在 main、无独有成果，再清理本次工作区和 codex/upstream-sync-20261113。过渡接力文档已指向原目录；本次依赖软链、测试日志及 WIP 合并材料已清理。
-  - 分支／worktree：codex/upstream-sync-20261113；/Users/dylan/.codex/worktrees/autoloop-upstream-20261113/agent-autoloop。源码及现役规则的最新记录以 /Users/dylan/projects/agent-autoloop/ROADMAP.md 为准。
-
 - 飞书上游样式的真实客户端与自然投递验收。
   - 状态：待验证
   - 接续条件：主人要求暂停定制展示；Mac Mini 使用上游 v1.8.3 的完整正文与展开回答框，按主人后续要求保留项目｜事项｜状态标题及底部卡片编号，项目映射参与标题展示。此前定制样式的后续验收暂停；已确认的历史截图结果仍有效。本次左右图为同内容本地预览，不是飞书客户端截图；MacBook Air 未操作。
@@ -34,6 +28,8 @@
   - 证据位置：原接力提交7ecd830与docs/融合实施与验收.md。
 
 ## 最近完成
+
+- 2026-11-15 22:52，北京时间：Mac Mini 完成本次临时合并工作区清理。会话通过原生迁移切回原目录后，旧工作区由 archive_worktree 归档，list_artifacts 读回 archived_worktree，归档标识为 01a1dfaf-de3f-7212-bc94-5ae929db2dfe；原生恢复键为 /Users/dylan/.codex/worktrees/autoloop-upstream-20261113/agent-autoloop。已核实旧目录及 Git 注册消失，临时分支 codex/upstream-sync-20261113 的全部提交已包含于 main 且未被其他工作区使用，随后普通删除并确认分支不存在。原目录保持 main、6a72220、工作树干净；本次仅同步此清理记录，未操作其他会话或正式安装，未提交推送。原清理待办已移出未完成任务。
 
 - 2026-11-15 21:30，北京时间：Mac Mini 完成卡片 #93 的中台持久更正。新增仅本人可调用的更正入口，版本核对后追加事实，只改待答卡片的标题、正文和版本，保留编号、选项、消息引用与业务状态。四份运行源码已定向部署，原卡版本1→2由原飞书通道更新同一消息；更正后实际重启、重复更正不落新事实及原消息读回通过。55402条历史事实前缀、19份保护文件及另外两个执行池 PID 保持，临时暂停均恢复；未回答卡片、重跑业务、改服务器／基线或创建恢复点，MacBook Air 未操作。协议、状态机、README 中英文、INSTALL、SKILL 与 SECURITY 已同步。主人后续授权本批源码和正式测试提交并 push，按本轮普通 Git 交付执行，远端结果以交付回执为准；不发版。证据：~/.agent-autoloop/evidence/card93-readable-20261115/persistent-verification.json、persistent-checks.json。
 
@@ -71,8 +67,6 @@
 
 - 2026-11-09 14:40：Mac Mini M6 合并 upstream/main 的8个新提交（2ee1489，包含 v1.7.0 及后续 ACP 空回复修复），保留 Fork 的 doctor 受管服务诊断，生成并部署本地合并提交36c5d24。3个服务、11个 Agent、双通道及22条规则在线；原1732轮历史、5张卡片、9份私有文件和全部暂停状态核对保留。14:40自然任务1733／1734均完成，业务回执分别为 confirmed／idle。程序、数据库及配置恢复材料保存在本机 ~/.agent-autoloop/backups/local-source-20261109-143355-cab79da6/。未推送 Fork；本页收尾记录未提交；MacBook Air 未操作。
 - 2026-11-09 14:40：完成 proxy 只读接入评估，尚未实施或变更其调度。建议首批由 autoloop 调用现有5分钟主监测脚本，异常／恢复事件触发只读诊断，复用 local-business／local-ai；项目任务配置及薄适配归 proxy，现有告警队列、独立哨兵和 Healthchecks 保持职责。适配必须读取 active 等业务字段，不能将退出0或 ok 当作无告警；只在状态变化时发稳定编号的事件，防止每轮唤醒 AI。CF 私有状态仍为 platform_blocked，本次不接优选或恢复发布。proxy 有另一项发布施工，本轮未改其工作树或现役任务。
-
-- 2026-11-08 02:40：Mac Mini 修复 doctor 的受管服务误报，按私有配置逐项检查 launchd 顶层运行状态和进程号；默认服务诊断及原启停方式保持。修复91dbc35已通过本地源码快照安装，真实 doctor 返回0，三个服务、11个 Agent、双通道和22条规则在线；原暂停状态、9份私有文件指纹、60轮和5张历史卡片保持。配置登记只新增 managedServices，原配置恢复点及本次程序／数据库备份留在本机。MacBook Air 未操作。
 
 ## 最近验证
 
