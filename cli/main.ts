@@ -434,7 +434,7 @@ async function tryIt() {
   const attempts = attemptsOf(before.runs);
   await client(config.source.key, config)
     .event({ id: `try-${stamp}`, type: "try.start", subject: `#${stamp}` })
-    .catch((error) => fail(`连不上中台（${error.message}）：先 agent-autoloop up 或 agent-autoloop service install`));
+    .catch((error) => fail(plainly(error)));
   const retrying = waitingRetry(before.runs);
   if (retrying) {
     const clock = { timeZone: before.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" } as const;
@@ -853,6 +853,12 @@ function plainly(error: any): string {
   } catch {}
   const cause = (error as { cause?: { code?: string; message?: string } }).cause;
   const why = cause?.code ?? cause?.message;
+  if (cause?.code === "EPERM" || cause?.code === "EACCES") {
+    return (
+      `连不上中台 ${url}（${cause.code}）：当前进程的权限或沙箱阻止了连接。` +
+      "请在沙箱外运行 agent-autoloop status 核对服务，再检查该任务的网络权限。"
+    );
+  }
   return (
     `连不上中台 ${url}${why ? `（${why}）` : ""}：中台没在运行，或者刚启动还没好。` +
     "在中台那台电脑上运行 agent-autoloop service install 启动它；刚装好、刚更新的等几秒再试。"

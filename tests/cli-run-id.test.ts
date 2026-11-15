@@ -1,6 +1,7 @@
 // Naming a run: `stop` and `why` with no number, or with a word that is not one, used to send /v1/runs/NaN to the hub and
 // print "没有这个地址", which reads like a broken hub rather than a mistyped command. Found here by running the real program in a home nothing is installed into: the usage must come before any hub is asked.
 // A hub that doesn't answer was said as a bare "fetch failed", with no word of which hub or what to do.
+// A sandbox refusing a connection must not be diagnosed as a stopped hub or recommend reinstalling its service.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
@@ -16,11 +17,11 @@ const program = join(import.meta.dirname, "..", "bin", "agent-autoloop.ts");
 const dir = mkdtempSync(join(tmpdir(), "agent-autoloop-cli-run-id-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
-async function run(args: string[], home = join(dir, "home")) {
+async function run(args: string[], home = join(dir, "home"), preload?: string) {
   try {
     const { stdout, stderr } = await promisify(execFile)(
       process.execPath,
-      ["--disable-warning=ExperimentalWarning", program, ...args],
+      ["--disable-warning=ExperimentalWarning", ...(preload ? ["--import", preload] : []), program, ...args],
       { env: { ...process.env, AGENT_AUTOLOOP_HOME: home } },
     );
     return { code: 0, stdout, stderr };
@@ -71,4 +72,27 @@ test("a hub that doesn't answer is named, with what to do, not left as a bare fe
   assert.equal(ran.code, 1);
   assert.match(ran.stderr, new RegExp(`连不上中台 http://127\\.0\\.0\\.1:${port}`));
   assert.match(ran.stderr, /service install/);
+});
+
+test("a denied connection reports the permission boundary instead of recommending a service install", async () => {
+  const home = join(dir, "network-denied");
+  mkdirSync(home);
+  writeFileSync(
+    join(home, "config.json"),
+    JSON.stringify({ url: "http://127.0.0.1:3350", owner: "owner-test", source: { key: "source-test" } }),
+  );
+  const preload = join(dir, "network-denied.mjs");
+  for (const code of ["EPERM", "EACCES"]) {
+    writeFileSync(
+      preload,
+      `globalThis.fetch = async () => { throw new TypeError("fetch failed", { cause: { code: "${code}" } }); };`,
+    );
+    for (const command of ["status", "try"]) {
+      const ran = await run([command], home, preload);
+      assert.equal(ran.code, 1);
+      assert.match(ran.stderr, /权限|沙箱/);
+      assert.match(ran.stderr, new RegExp(code));
+      assert.doesNotMatch(ran.stderr, /service install|中台没在运行/);
+    }
+  }
 });
