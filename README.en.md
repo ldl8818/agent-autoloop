@@ -106,6 +106,14 @@ External events work the same way once the source is connected. To hand new GitH
 
 Changes take effect within seconds of saving. Run `agent-autoloop check` to validate, `agent-autoloop check <file>` to validate a draft without touching the running hub, `agent-autoloop rules explain [file]` to see the rules in effect and their next runs (a draft file too), and `agent-autoloop emit <type> --dry-run` to preview who an event would go to (it doesn't contact the hub or write to the log). If you make a mistake, or the file is deleted or can't be read, the hub keeps running the previous valid rules and sends you a card about it.
 
+### Daily runtime brief
+
+This local fork provides `node scripts/runtime-brief.ts <config.json path> <project>...` to summarize current work, completed rounds since Beijing midnight, pending decisions and offline workers. A project matches both `project-` and `maintenance-project-` rule prefixes. Completed rounds do not prove business recovery.
+
+Use this command with `use: "command"`, `{ "cron": "0 9 * * *" }` and the `Asia/Shanghai` hub timezone to send a daily brief at 09:00 through the existing channels. Use absolute command arguments. When project fragments manage the local installation, merge the fragment through that registration entry instead of overwriting shared `rules.json`.
+
+The fixed script only reads `GET /v1/state` and returns a notice receipt for the existing worker and channels. It does not call a model, answer cards or perform repairs. Owner credentials remain in the private configuration. Command agents run as the host account; their code defines their behavior, independently of the Codex sandbox.
+
 ### How agents talk back to the hub
 
 The hub asks only one thing of an agent: **put your result in your final message**. When the job is done, a one-line conclusion is enough. To ask you something, the agent appends an `agent-autoloop` block:
@@ -163,9 +171,9 @@ Built-in plugins ship with the program and are enabled through configuration. Us
 | **Channels**: how cards reach you | [Desktop notifications](plugins/desktop/channel.ts) (on by default), [Feishu](plugins/feishu/channel.ts), [DingTalk / WeCom / Slack / Discord](plugins/webhook/templates.ts) | [Guide](skills/agent-autoloop/SKILL.md#接一个通道) |
 | **Delivery**: CI/CD as a plugin | [`delivery`](plugins/delivery/delivery.ts) | [Guide](skills/agent-autoloop/SKILL.md#交付流水线) |
 
-Feishu decision cards also offer an expandable custom-plan input. Submit your own instructions to resume the asking task with your literal text; keyboard dictation can supply the text before you review and submit it. Blank input does not answer a card, and only the first answer takes effect.
+Custom Feishu decision cards also offer an expandable custom-plan input; the upstream presentation shows its text answer form directly. Submit your own instructions to resume the asking task with your literal text; keyboard dictation can supply the text before you review and submit it. Blank input does not answer a card, and only the first answer takes effect.
 
-Cards in a shared Feishu chat identify the project, task and state, show the brief or outcome first, and fold the full evidence. See [Feishu card display](docs/protocol.md#飞书卡片展示) for project labels and compatibility with existing cards.
+Cards in a shared Feishu chat identify the project, task and state in the heading. Custom cards show the brief or outcome first and fold the full evidence. The upstream presentation keeps the full text and visible answer form with the same project heading. See [Feishu card display](docs/protocol.md#飞书卡片展示) for the style setting, project labels and compatibility with existing cards.
 
 On macOS and Linux, Codex can resume the same thread through its owning Desktop server. A busy thread continues automatically once idle; see [session resumption](docs/plugins.md#codex-原会话续接).
 

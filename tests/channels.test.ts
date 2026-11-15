@@ -10,6 +10,7 @@
 // An ask card that only takes choices loses the account someone would type; words without a choice must still answer.
 // A U+2028 or U+2029 in what someone typed, which JSON leaves as it is, cuts the click's line and loses the click.
 // Older lark-cli releases reject `--content -`, so a first card must not depend on that stdin convention.
+// Switching to the upstream card must restore its full text and visible answer form without changing callback identity.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -41,6 +42,27 @@ const base: Card = {
   result: null,
   link: "https://hub.test/c/x",
 };
+
+test("feishu: upstream cards use project headings but retain full text and visible text answers", () => {
+  const input = { ...base, rule: "shop-check", text: "简短结论\n\n## 详情\n完整方案" };
+  const card = render(input, { "shop-": "店铺" }, "upstream");
+  assert.equal(card.header.title.content, "店铺｜要不要删｜等待决定");
+  assert.equal((card.header as any).subtitle.content, "来源：shop-check");
+  assert.deepEqual(card.body.elements[0], { tag: "markdown", content: input.text });
+  const form = card.body.elements.find((e) => e.tag === "form") as any;
+  assert.equal(form.elements[0].name, "note");
+  assert.equal(form.elements[1].name, "ask_text_submit_5");
+  assert.ok(!JSON.stringify(card).includes("collapsible_panel"));
+  assert.deepEqual(card.body.elements.at(-1), {
+    tag: "div",
+    text: { tag: "plain_text", content: "卡片 #5" },
+  });
+  const done = render({ ...input, state: "done", choice: 0, result: "删了" }, {}, "upstream");
+  assert.equal(done.header.title.content, "shop-check｜要不要删｜已执行");
+  assert.ok(!done.body.elements.some((e) => e.tag === "form" || e.tag === "interactive_container"));
+  assert.match(JSON.stringify(done), /已执行：删了/);
+  assert.deepEqual(done.body.elements.at(-1), card.body.elements.at(-1));
+});
 
 test("feishu: project labels come from configured rule prefixes without changing either card's answer", () => {
   const projects = { "shop-": "店铺", "maintenance-shop-": "店铺", "ops-": "运维" };
@@ -271,6 +293,7 @@ case "$*" in
       if [ "$previous" = "--content" ]; then content=$argument; break; fi
       previous=$argument
     done
+    printf '%s' "$content" > "${join(dir, "upstream-content.json")}"
     case "$content" in
       \{*) echo '{"ok":true,"data":{"message_id":"om_5"}}' ;;
       *) exit 1 ;;
@@ -298,7 +321,16 @@ esac
       return {};
     },
   };
-  await feishu({ hub: hub as any, options: { user: "ou_me", lark }, log: () => {}, signal: stop.signal });
+  await feishu({
+    hub: hub as any,
+    options: { user: "ou_me", lark, cardStyle: "upstream" },
+    log: () => {},
+    signal: stop.signal,
+  });
+  const content = JSON.parse(readFileSync(join(dir, "upstream-content.json"), "utf8"));
+  assert.equal(content.header.title.content, "中台｜要不要删｜等待决定");
+  assert.equal(content.body.elements.at(-2).name, "ask_text_5");
+  assert.equal(content.body.elements.at(-1).text.content, "卡片 #5");
   assert.deepEqual(failed, []);
   assert.deepEqual(delivered, [[5, 1, "om_5"]]);
 });

@@ -36,6 +36,27 @@ function projectName(card: Card, projects: Record<string, string>) {
   return match?.[1].trim() || card.rule || "中台";
 }
 
+function headingOf(card: Card, projects: Record<string, string>) {
+  const title = Array.from(card.title.replace(/^主人[，,：:]\s*/u, "").split("\n")[0])
+    .slice(0, 36)
+    .join("");
+  const status =
+    card.state === "open"
+      ? card.kind === "ask"
+        ? "等待决定"
+        : "待处理"
+      : card.state === "decided"
+        ? "等待处理"
+        : card.state === "done"
+          ? "已执行"
+          : card.kind === "ask"
+            ? "已结束"
+            : card.result
+              ? "已结案"
+              : "进度通知";
+  return { title, heading: `${projectName(card, projects)}｜${title}｜${status}` };
+}
+
 function contentOf(card: Card, settled: boolean, title: string) {
   if (!card.text && title === card.title) return [];
   const marker = "\n\n## 详情\n";
@@ -62,26 +83,90 @@ function contentOf(card: Card, settled: boolean, title: string) {
   ];
 }
 
-/** One card, as it looks now: the options while it's open, what became of it after. */
-export function render(card: Card, projects: Record<string, string> = {}) {
+// Upstream v1.8.3 presentation; keep callbacks below compatible with already delivered custom cards.
+function renderUpstream(card: Card) {
   const outcome = outcomeOf(card);
-  const title = Array.from(card.title.replace(/^主人[，,：:]\s*/u, "").split("\n")[0])
-    .slice(0, 36)
-    .join("");
-  const status =
-    card.state === "open"
-      ? card.kind === "ask"
-        ? "等待决定"
-        : "待处理"
-      : card.state === "decided"
-        ? "等待处理"
-        : card.state === "done"
-          ? "已执行"
-          : card.kind === "ask"
-            ? "已结束"
-            : card.result
-              ? "已结案"
-              : "进度通知";
+  // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
+  const option = (label: string, index: number) => ({
+    tag: "interactive_container",
+    width: "fill",
+    has_border: true,
+    border_color: index === card.recommend ? "blue" : "grey",
+    corner_radius: "8px",
+    padding: "8px 12px 8px 12px",
+    behaviors: [{ type: "callback", value: { card: card.id, choice: index } }],
+    elements: [{ tag: "div", text: { tag: "plain_text", content: label } }],
+  });
+  const afterwards = outcome ? [{ tag: "markdown", content: `**${outcome}**` }] : [];
+  const noteSaid =
+    card.kind === "notice" && card.answer
+      ? [{ tag: "div", text: { tag: "plain_text", content: `处理说明：${card.answer}` } }]
+      : [];
+  const notice = card.kind === "notice";
+  // Both forms submit `note`; an ask uses it as the answer, a notice records it when closing the card.
+  const textForm = [
+    {
+      tag: "form",
+      name: notice ? "handling_note" : `ask_text_${card.id}`,
+      elements: [
+        {
+          tag: "input",
+          name: "note",
+          input_type: "multiline_text",
+          rows: 2,
+          auto_resize: true,
+          max_length: 1000,
+          label: { tag: "plain_text", content: notice ? "处理说明（可不填）" : "选项都不合适，就直接写回答" },
+          label_position: "top",
+          placeholder: {
+            tag: "plain_text",
+            content: notice
+              ? "比如：已回复他视频下周发；或：群发广告，不用管"
+              : "写好点“提交文字”；写了再点选项，文字不会带上",
+          },
+        },
+        {
+          tag: "button",
+          name: notice ? `handling_note_submit_${card.id}` : `ask_text_submit_${card.id}`,
+          form_action_type: "submit",
+          type: notice ? "primary" : "default",
+          text: { tag: "plain_text", content: notice ? "记录并结案" : "提交文字" },
+        },
+      ],
+    },
+  ];
+  return {
+    schema: "2.0",
+    config: { update_multi: true, enable_forward: false },
+    header: {
+      title: { tag: "plain_text", content: card.title },
+      // Which rule or task it came from, in every state: cards from many places reach one person.
+      ...(card.rule && card.rule !== card.title
+        ? { subtitle: { tag: "plain_text", content: `来源：${card.rule}` } }
+        : {}),
+      template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
+    },
+    body: {
+      elements: [
+        ...(card.text ? [{ tag: "markdown", content: card.text }] : []),
+        ...(card.state === "open"
+          ? [...(notice ? textForm : []), ...card.options.map(option), ...(notice ? [] : textForm)]
+          : [...afterwards, ...noteSaid]),
+      ],
+    },
+  };
+}
+
+/** One card, as it looks now: the options while it's open, what became of it after. */
+export function render(card: Card, projects: Record<string, string> = {}, cardStyle: "custom" | "upstream" = "custom") {
+  const { title, heading } = headingOf(card, projects);
+  if (cardStyle === "upstream") {
+    const original = renderUpstream(card);
+    original.header.title.content = heading;
+    original.body.elements.push({ tag: "div", text: { tag: "plain_text", content: `卡片 #${card.id}` } });
+    return original;
+  }
+  const outcome = outcomeOf(card);
   // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
   const option = (label: string, index: number) => ({
     tag: "interactive_container",
@@ -156,7 +241,7 @@ export function render(card: Card, projects: Record<string, string> = {}) {
     schema: "2.0",
     config: { update_multi: true, enable_forward: false },
     header: {
-      title: { tag: "plain_text", content: `${projectName(card, projects)}｜${title}｜${status}` },
+      title: { tag: "plain_text", content: heading },
       // Which rule or task it came from, in every state: cards from many places reach one person.
       ...(card.rule && card.rule !== card.title
         ? { subtitle: { tag: "plain_text", content: `来源：${card.rule}` } }
@@ -227,6 +312,7 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
             projects && typeof projects === "object" && !Array.isArray(projects)
               ? (projects as Record<string, string>)
               : {},
+            options.cardStyle === "upstream" ? "upstream" : "custom",
           ),
         );
         let ref = card.ref;
