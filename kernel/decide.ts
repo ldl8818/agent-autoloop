@@ -26,6 +26,7 @@ import {
   ANSWER_REF,
   ANSWER_TEXT,
   DELIVERY_REF,
+  parseCardCorrection,
   parseEvent,
   parseResult,
   type Later,
@@ -763,6 +764,21 @@ const HANDLERS: Record<string, (draft: Draft, ...args: any[]) => unknown> = {
       closeStopped(draft, id, "已停止");
     } else if (run.state === "claimed") put(draft, "runs", id, { cancel_at: draft.at });
     else throw new InputError("这一轮已经结束了");
+  },
+  correctCard(draft, id, input) {
+    const given = parseCardCorrection(input);
+    const card = draft.view.get("cards", id);
+    if (!card) throw new NotFound("没有这张卡片");
+    if (card.state !== "open" || card.version !== given.version) throw new Conflict("卡片已变化，请重新读取后再更正");
+    if (card.title === given.title && card.text === given.text) return { changed: false, version: card.version };
+    const version = card.version + 1;
+    put(draft, "cards", id, {
+      title: given.title,
+      text: given.text,
+      version,
+      correction: { reason: given.reason, by: "本人" },
+    });
+    return { changed: true, version };
   },
   resolve(draft, id, reason, by) {
     const card = draft.view.get("cards", id);

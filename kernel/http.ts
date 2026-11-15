@@ -191,8 +191,12 @@ async function nextCard(call: Call) {
 
 async function cardAction(call: Call, id: number, action: string) {
   const channel = keyHolder(call, "channel");
-  requireKey(call, action === "resolve" || (action === "answer" && !channel) ? "owner" : "channel");
+  requireKey(
+    call,
+    action === "resolve" || action === "correct" || (action === "answer" && !channel) ? "owner" : "channel",
+  );
   const given = await readJson(call.request);
+  if (action === "correct") return json(act(call, "correctCard", id, given));
   if (action === "resolve") {
     const reason = given?.reason;
     if (typeof reason !== "string" || !reason.trim() || reason.length > 1000) {
@@ -322,7 +326,7 @@ async function route(call: Call): Promise<Response> {
   }
   if (method === "POST" && action === "result") return json(act(call, "finish", runId, token, await readJson(request)));
   if (method === "GET" && path === "/v1/cards/next") return nextCard(call);
-  const card = /^\/v1\/cards\/([1-9][0-9]*)\/(delivered|failed|answer|resolve)$/.exec(path);
+  const card = /^\/v1\/cards\/([1-9][0-9]*)\/(delivered|failed|answer|resolve|correct)$/.exec(path);
   if (method === "POST" && card) return cardAction(call, Number(card[1]), card[2]);
   const ruleControl = /^\/v1\/rules\/([^/]+)\/(pause|resume|run|replay)$/.exec(path);
   if (method === "POST" && ruleControl) return control(call, ruleControl[1], ruleControl[2]);

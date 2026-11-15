@@ -287,6 +287,20 @@ export default {
 
 浏览器由 Agent 的运行环境提供。Codex 使用后台 `codex exec`，不能假定桌面应用的浏览器连接自动可用；使用该轮实际可用的浏览器工具，或规则、Skill 明确配置的入口。入口只处理网页步骤并接续自己的会话，业务和回执仍由主任务负责。中台不附带浏览器桥接，不安装或授权浏览器工具；接入验收见[插件说明](plugins.md#浏览器接入)。
 
+## 更正待答卡片
+
+```http
+POST /v1/cards/56/correct    Authorization: Bearer <本人的密钥>
+{ "version": 1, "title": "更正后的标题", "text": "更正后的正文", "reason": "原说明把故障分类误写为项目名" }
+→ 200 { "changed": true, "version": 2 }
+```
+
+只允许本人更正 `open` 卡片的标题与正文。必须提供读回的版本和更正原因；`title` 为1至200字，`text` 为1至4000字，`reason` 为1至1000字，均不接受纯空白。`version` 为正安全整数；对象只接受这四个字段。版本已变或卡片已被回答／结案时返回409，卡片不存在返回404。当前版本的标题和正文均相同时返回 `changed: false`，不追加事实。
+
+更正通过追加 `correctCard` 事实保存，不改写旧事实或直接修改投影；原因和操作者保存在该事实卡片记录的 `correction` 中，可从原轮次的 `why` 和本人日志流读取。编号、选项、推荐、回答归属、事项、规则及业务状态不变，不生成回答事件或执行轮次；版本加一让各通道按原 `ref` 更新原消息。之后回答、结案、重启及投影重建均沿用更正后的正文。
+
+这是兼容的本人接口扩展；旧插件、规则及 `/v1` 接口不变。老中台没有此入口会返回404，不能以直接修改通道消息代替持久更正。
+
 ## 通道：把卡片送到你面前
 
 通道是一个往外连的小程序。
@@ -295,7 +309,7 @@ export default {
 GET /v1/cards/next?wait=50    Authorization: Bearer <通道的密钥>
 → 200 { "card": null | Card }
 
-// Card：这张卡片现在的样子。内容创建后不变，只有状态会变
+// Card：这张卡片现在的样子。状态更新沿用已保存正文；本人可更正尚未回答的卡片。
 { "id": 56, "version": 2, "ref": null, "kind": "ask", "state": "open",
   "title": "…", "text": "…", "options": ["…", "…"], "recommend": 0,
   "choice": null, "answer": null, "by": null, "result": null, "link": null, "rule": "…" }

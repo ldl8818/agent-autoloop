@@ -127,6 +127,21 @@ const validAsk = (ask: Item) =>
 /** A question as a receipt asks it, here asked by a task elsewhere. */
 export const isAsk = (value: unknown) => isItem(value) && validAsk(value as Item);
 
+export type CardCorrection = { version: number; title: string; text: string; reason: string };
+export function parseCardCorrection(value: unknown): CardCorrection {
+  const given = isItem(value) ? (value as Item) : {};
+  if (
+    !only(given, ["version", "title", "text", "reason"]) ||
+    !Number.isSafeInteger(given.version) ||
+    (given.version as number) < 1 ||
+    !text(given.title, 200) ||
+    !text(given.text, 4000) ||
+    !text(given.reason, 1000)
+  )
+    throw new InputError("更正要有正整数 version、200 字内 title、4000 字内 text 和 1000 字内 reason，不能改其他字段");
+  return given as CardCorrection;
+}
+
 const validNotice = (notice: Item) =>
   only(notice, ["title", "text", "key", "fyi"]) &&
   text(notice.title, 200) &&

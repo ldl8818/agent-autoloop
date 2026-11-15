@@ -1,5 +1,6 @@
 // A hub, from the outside: how a worker, a channel or the command line reaches it. Nothing here is more than an HTTP
 // request, which is the whole of what it takes to plug into the hub.
+import type { CardCorrection } from "./validate.ts";
 export class HubError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -55,6 +56,7 @@ export function hubClient(url: string, key: string) {
     state: (before?: number) => call("GET", before === undefined ? "/v1/state" : `/v1/state?before=${before}`),
     cancel: (run: number) => call("POST", `/v1/runs/${run}/cancel`, { body: {} }),
     resolve: (card: number, reason: string) => call("POST", `/v1/cards/${card}/resolve`, { body: { reason } }),
+    correctCard: (card: number, body: CardCorrection) => call("POST", `/v1/cards/${card}/correct`, { body }),
     // Rule control: facts in the log, rules.json stays as the owner wrote it.
     pause: (rule: string, body: { reason?: string; until?: string } = {}) =>
       call("POST", `/v1/rules/${encodeURIComponent(rule)}/pause`, { body }),

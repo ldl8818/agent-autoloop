@@ -1,4 +1,5 @@
-// What reaches the owner. A card's words never change; only its state does. Failure cases: asking the same thing while it
+// What reaches the owner. State updates preserve saved wording; owner corrections have their own tests.
+// Failure cases: asking the same thing while it
 // is open makes a second card, or closed it blocks asking again; an answer takes a choice that doesn't exist, carries
 // more words or a longer reference than the protocol allows, counts twice,
 // or beats a resolve that came first (only one may change an open card); an answer from someone not on the channel's list,
