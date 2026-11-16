@@ -10,6 +10,8 @@
 
 The owner can [correct a pending card](docs/protocol.md#更正待答卡片) persistently; later status updates retain the corrected wording.
 
+This local fork's `main` uses the original task flow and upstream Feishu presentation by default, retaining project headings and card numbers. The disabled Solo to Team integration is preserved on `feature/solo-to-team-integration`.
+
 ## What problem does it solve?
 
 Most of us use command-line agents like Claude Code or Codex by babysitting a terminal: you type a prompt, watch it run, and answer its questions. Close the window or walk away, and the work stops.
@@ -110,7 +112,7 @@ Changes take effect within seconds of saving. Run `agent-autoloop check` to vali
 
 ### Daily runtime brief
 
-This local fork provides `node scripts/runtime-brief.ts <config.json path> <project>...` to summarize current work, completed rounds since Beijing midnight, pending decisions and offline workers. A project matches both `project-` and `maintenance-project-` rule prefixes. Completed rounds do not prove business recovery.
+This local fork provides `node scripts/runtime-brief.ts <config.json path> <project>...` to summarize current work, completed rounds since Beijing midnight, pending decisions and offline workers. A project matches its exact rule name and the `project-` rule prefix. Completed rounds do not prove business recovery.
 
 Use this command with `use: "command"`, `{ "cron": "0 9 * * *" }` and the `Asia/Shanghai` hub timezone to send a daily brief at 09:00 through the existing channels. Use absolute command arguments. When project fragments manage the local installation, merge the fragment through that registration entry instead of overwriting shared `rules.json`.
 
@@ -159,8 +161,6 @@ Feedback, website watch, Feishu briefs, and inbox triage default to Asia/Shangha
 More: [Claude-to-Codex browser handoff](examples/recipes/browser-handoff/README.md) and [weekly code cleanup](examples/skills/weekly-sweep/SKILL.md).
 
 ## Plugin ecosystem: swap any of the four sides
-
-The optional [maintenance workflow](docs/维护工作流.md) separates planning, owner decisions, execution and independent verification. Each role can use Codex or Claude Code. Project hooks supply trusted facts and bounded actions; the existing hub owns scheduling and retries.
 
 An owner request can enter the same workflow through the existing event API. Its contract identifies the goal, deliverable and acceptance criteria; independent evidence identifies the version, location and environment. Delivery and observed business recovery remain separate. Scheduling reuses the hub and existing workers.
 

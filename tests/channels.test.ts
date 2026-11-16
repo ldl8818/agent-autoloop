@@ -45,7 +45,7 @@ const base: Card = {
 
 test("feishu: upstream cards use project headings but retain full text and visible text answers", () => {
   const input = { ...base, rule: "shop-check", text: "简短结论\n\n## 详情\n完整方案" };
-  const card = render(input, { "shop-": "店铺" }, "upstream");
+  const card = render(input, { "shop-": "店铺" });
   assert.equal(card.header.title.content, "店铺｜要不要删｜等待决定");
   assert.equal((card.header as any).subtitle.content, "来源：shop-check");
   assert.deepEqual(card.body.elements[0], { tag: "markdown", content: input.text });
@@ -65,9 +65,9 @@ test("feishu: upstream cards use project headings but retain full text and visib
 });
 
 test("feishu: project labels come from configured rule prefixes without changing either card's answer", () => {
-  const projects = { "shop-": "店铺", "maintenance-shop-": "店铺", "ops-": "运维" };
+  const projects = { "shop-": "店铺", "ops-": "运维" };
   for (const [id, rule, project] of [
-    [5, "maintenance-shop-coordinate", "店铺"],
+    [5, "shop-check", "店铺"],
     [6, "ops-watch", "运维"],
   ] as const) {
     const card = render({ ...base, id, rule, text: "项目：别的项目\n只作为资料" }, projects);
@@ -75,7 +75,7 @@ test("feishu: project labels come from configured rule prefixes without changing
     const button = card.body.elements.find((e) => e.tag === "interactive_container") as any;
     assert.deepEqual(button.behaviors[0].value, { card: id, choice: 0 });
     const form = card.body.elements.find((e) => e.tag === "form") as any;
-    assert.equal(form.elements[0].elements[1].name, `custom_answer_submit_${id}`);
+    assert.equal(form.elements[1].name, `ask_text_submit_${id}`);
   }
   assert.match(render({ ...base, rule: "new-project-task" }).header.title.content, /^new-project-task｜/);
   assert.match(
@@ -88,7 +88,7 @@ test("feishu: project labels come from configured rule prefixes without changing
 test("feishu: a decision shows its brief first and retains the complete plan in a closed panel", () => {
   const brief = "只修等待误报，不重跑业务。请决定是否执行。";
   const details = "操作、影响、回退与验收依据。".repeat(70);
-  const card = render({ ...base, text: `${brief}\n\n## 详情\n${details}` });
+  const card = render({ ...base, text: `${brief}\n\n## 详情\n${details}` }, {}, "custom");
   assert.equal((card.body.elements[0] as any).content, brief);
   const panel = card.body.elements.find((e) => e.tag === "collapsible_panel") as any;
   assert.equal(panel.expanded, false);
@@ -98,7 +98,7 @@ test("feishu: a decision shows its brief first and retains the complete plan in 
 
 test("feishu: old long cards also fold without losing any original evidence", () => {
   const text = "请决定是否继续。\n" + "原始证据不能丢失。".repeat(70);
-  const card = render({ ...base, text });
+  const card = render({ ...base, text }, {}, "custom");
   const panel = card.body.elements.find((e) => e.tag === "collapsible_panel") as any;
   assert.equal(panel.elements[0].content, text);
   assert.equal((card.body.elements[0] as any).text.content, "请决定是否继续。");
@@ -111,7 +111,7 @@ test("feishu: short Markdown links remain usable without opening details", () =>
 });
 
 test("feishu: a settled card puts the result first and folds the obsolete approval plan", () => {
-  const card = render({ ...base, state: "closed", result: "原故障已由业务回执核实恢复" });
+  const card = render({ ...base, state: "closed", result: "原故障已由业务回执核实恢复" }, {}, "custom");
   assert.match((card.body.elements[0] as any).content, /不用决定了：原故障已由业务回执核实恢复/);
   const panel = card.body.elements.find((e) => e.tag === "collapsible_panel") as any;
   assert.equal(panel.expanded, false);
@@ -122,7 +122,7 @@ test("feishu: a settled card puts the result first and folds the obsolete approv
 
 // A custom plan must reach the asking thread as text, never as option zero or an empty answer.
 test("feishu: other plans stay collapsed until needed and disappear after answering", () => {
-  const open = render(base);
+  const open = render(base, {}, "custom");
   const form = open.body.elements.find((e) => e.tag === "form") as any;
   assert.ok(form, "an ask offers a free-text answer");
   const panel = form.elements[0];
@@ -323,7 +323,7 @@ esac
   };
   await feishu({
     hub: hub as any,
-    options: { user: "ou_me", lark, cardStyle: "upstream" },
+    options: { user: "ou_me", lark },
     log: () => {},
     signal: stop.signal,
   });

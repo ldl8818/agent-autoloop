@@ -13,8 +13,7 @@ type State = {
   cards: { id: number; rule?: string; kind: string; title: string }[];
 };
 
-const belongsTo = (rule: string, project: string) =>
-  rule === project || rule.startsWith(`${project}-`) || rule.startsWith(`maintenance-${project}-`);
+const belongsTo = (rule: string, project: string) => rule === project || rule.startsWith(`${project}-`);
 
 // Card titles are data. Keep the brief compact without letting their Markdown change its structure.
 const label = (text: string) =>

@@ -48,8 +48,7 @@ export type Reading = {
 };
 export type Adapter = {
   /** Its command line for this turn. */
-  /** Trusted caller-specific CLI settings; plugins that accept them keep them inside any launcher. */
-  command(turn: Turn, startup?: string[]): string[];
+  command(turn: Turn): string[];
   /** Optional controller for work that outlives its local process group. */
   cancel?(turn: Turn): string[];
   /** What its output says so far. `code` is null while it's still running or when it died without saying. */

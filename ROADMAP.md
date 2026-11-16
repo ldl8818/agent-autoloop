@@ -4,7 +4,19 @@
 
 ## 当前接力点
 
-- 状态：无
+- 状态：进行中
+- 任务：撤下 Solo to Team 维护流程，main 恢复原版处理方式。
+- 范围：将接入版保存在 feature/solo-to-team-integration；移除维护插件及现行文档入口，停用 Mac Mini 上相关规则和旧维护卡片。保留正常业务、历史记录、独立修复及标题和卡片编号。
+- 分支／worktree：main；/Users/dylan/projects/agent-autoloop。
+- 已做到：接入版完整分支已指向 002d150；维护插件及现行说明已移出 main，飞书默认恢复上游展示。默认展示先失败后通过；50项专项、809项快速测试（22项平台跳过）、类型与格式通过，独立代码审查无必须修问题。
+- 已修改但未验证：Mac Mini 现役规则、覆盖插件及18张旧维护卡片尚未撤下。
+- 正在执行：每日检查；准备仅停用集成、恢复两项目原规则的真机切换。
+- 下一步：保存 main 源码改动并完成安装冒烟；暂停排空、停用旧规则与卡片、切换程序，核对历史与正常任务。
+- 验证：快速测试、类型、格式、安装冒烟；普通问答及正常任务规则保留，维护事件不再派单，历史事实和原暂停状态核对。
+- 证据位置：feature/solo-to-team-integration；.tmp/withdraw-solo-to-team/；现役验收归 ~/.agent-autoloop/evidence/solo-to-team-withdrawal-20261116/。
+- 阻塞：无。
+- 未提交范围：本任务源码、测试及相关文档。
+- 北京时间：2026-11-16 13:55。
 
 ## 未完成任务
 
@@ -20,12 +32,6 @@
   - 下一步：下一次自然发卡或原卡正常更新时，核对项目｜事项｜状态标题、来源副标题、底部编号、完整正文和展开的文字回答框；标题已是规则名时不重复来源。正常回答后确认原事项只接续一次，不新增测试消息、不重发历史卡片。
   - 分支／worktree：main；/Users/dylan/projects/agent-autoloop。
   - 证据位置：~/.agent-autoloop/evidence/feishu-heading-20261114/activation.json、verification.json；原版切换记录见 feishu-upstream-20261114；展示约定见 docs/protocol.md。
-
-- GitHub每日检查42693623642的macOS结果待核实。
-  - 状态：待验证
-  - 接续条件：单独查询原外部检查结果；本批未恢复该事项。
-  - 下一步：原运行本次读回为排队，GitHub 未返回任何作业结果。待作业结果可读后核对 macOS 结论。
-  - 证据位置：原接力提交7ecd830与docs/融合实施与验收.md。
 
 ## 最近完成
 

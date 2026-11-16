@@ -25,7 +25,7 @@ const state = {
   timezone: "Asia/Shanghai",
   lines: [
     { id: "shop-fetch", agent: "fetch", totals: counts(2), paused: null },
-    { id: "maintenance-shop-plan", agent: "planner", totals: counts(1, 1, 1), paused: null },
+    { id: "shop-check", agent: "planner", totals: counts(1, 1, 1), paused: null },
     { id: "ops-watch", agent: "watch", totals: counts(4, 0, 0, 1), paused: null },
     { id: "unrelated", agent: "other", totals: counts(99), paused: null },
   ],
@@ -37,7 +37,7 @@ const state = {
   ],
   channels: [{ id: "feishu", name: "飞书", online: true }],
   cards: [
-    { id: 20, rule: "maintenance-shop-plan", kind: "ask", title: "要不要继续？" },
+    { id: 20, rule: "shop-check", kind: "ask", title: "要不要继续？" },
     { id: 21, rule: "unrelated", kind: "ask", title: "别的项目" },
   ],
 };

@@ -158,7 +158,11 @@ function renderUpstream(card: Card) {
 }
 
 /** One card, as it looks now: the options while it's open, what became of it after. */
-export function render(card: Card, projects: Record<string, string> = {}, cardStyle: "custom" | "upstream" = "custom") {
+export function render(
+  card: Card,
+  projects: Record<string, string> = {},
+  cardStyle: "custom" | "upstream" = "upstream",
+) {
   const { title, heading } = headingOf(card, projects);
   if (cardStyle === "upstream") {
     const original = renderUpstream(card);
@@ -312,7 +316,7 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
             projects && typeof projects === "object" && !Array.isArray(projects)
               ? (projects as Record<string, string>)
               : {},
-            options.cardStyle === "upstream" ? "upstream" : "custom",
+            options.cardStyle === "custom" ? "custom" : "upstream",
           ),
         );
         let ref = card.ref;

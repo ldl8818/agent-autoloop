@@ -47,8 +47,6 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 
 共享接续在 macOS 和 Linux 开启。Windows 保留 CLI 续接；写入冲突保留原会话，待原持有者释放后由中台重派，不进入尚未支持确认停止的共享路径。连接用随机能力地址保护的一次性本机转接，不增加常驻服务，不删除会话锁，也不重启桌面应用。实现依据是 [Codex App Server](https://learn.chatgpt.com/docs/app-server) 的 `thread/resume`、`turn/start`、`thread/status/changed` 和 `turn/interrupt`，接口以本机 CLI 生成的 schema 为准。
 
-可信调用方可给 `command(turn, startup)` 的第二个参数传 CLI 启动设置；这是兼容的可选参数，旧插件与普通调用不变。维护岗位用它将关闭 Hook 和记忆的设置传到最终 CLI，避免设置误加到中间启动器。带有这类独立启动设置的任务不接入桌面共享服务，防止丢失岗位隔离。
-
 `turn.requestId` 是接单程序给同一轮及回执重写分别提供的稳定标识，重派不改变它。插件在本地进程之外仍有任务时，`read` 返回 `external: true`；确认该任务结束后才返回 `false`。停止和超时都必须确认外部任务已经结束。暂时无法确认时，接单程序保留记录、不提交结束回执，也不占本地执行额度；中台沿用租约机制标记结果未知，其他任务照常处理。可选的 `cancel(turn)` 只生成停止控制命令，恢复后继续确认原轮次，不能提交业务提示词。确认后，本人停止按 `cancelled` 结案，超时仍按 `failed` 交回。旧插件和原有 HTTP 协议不变。
 
 没有记录的续接（换了电脑、升级前就有的会话）或累计值变小时，这几项这次不报，不猜；下一次续接恢复正常。其他程序在同一个会话里用掉的量分不出来，比如本人打开链接接着聊，会算进下一次续接。CLI 改成只报单次时，插件要把这几项改回 `usage`，不要靠数字大小去猜。

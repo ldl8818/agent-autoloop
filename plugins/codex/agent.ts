@@ -13,7 +13,7 @@ export const IN_THE_APP = [
 ];
 
 const adapter: Adapter = {
-  command: (turn, startup = []) => {
+  command: (turn) => {
     // The elevated Windows sandbox runs as CodexSandboxUsers. Share only the supplied data, never the run token or key.
     if (process.platform === "win32" && turn.contextFile)
       powershell(`
@@ -26,7 +26,6 @@ const adapter: Adapter = {
     `);
     const argv = [
       turn.program ?? findProgram("codex", () => IN_THE_APP),
-      ...startup,
       "exec",
       ...(turn.resume ? ["resume"] : []),
       "--json",
@@ -51,7 +50,7 @@ const adapter: Adapter = {
           stablePath(process.execPath),
           "--disable-warning=ExperimentalWarning",
           join(import.meta.dirname, "resume.ts"),
-          JSON.stringify({ turn, argv, shared: startup.length === 0 && process.platform !== "win32" }),
+          JSON.stringify({ turn, argv, shared: process.platform !== "win32" }),
         ]
       : argv;
   },
