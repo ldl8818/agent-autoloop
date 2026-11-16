@@ -43,7 +43,7 @@ function sourceName(card: Card) {
   if (/^caipiao-[\p{Script=Han}]{2,12}$/u.test(rule)) return rule;
   // Diagnosis and repair rules span functions; their first title line can identify the specific work.
   if (/^caipiao-(diagnose|development|maintenance)(?:-|$)/u.test(rule)) {
-    const title = card.title.split("\n")[0];
+    const title = (card.taskTitle ?? card.title).split("\n")[0];
     const functionNames: [RegExp, string][] = [
       [/补抓|补采/u, "资料补抓"],
       [/报告|发布/u, "报告发布"],
@@ -73,8 +73,20 @@ function sourceName(card: Card) {
   return `caipiao-${name ? names[name] : "运行维护"}`;
 }
 
+function taskTitleOf(card: Card) {
+  if (card.kind === "notice" && card.title === card.rule) {
+    if (card.taskTitle?.trim()) return card.taskTitle.trim();
+    if (/^caipiao-[a-z0-9-]+$/u.test(card.rule ?? "")) return sourceName(card)!.replace(/^caipiao-/u, "");
+  }
+  return card.title;
+}
+
 function headingOf(card: Card, projects: Record<string, string>) {
-  const title = Array.from(card.title.replace(/^主人[，,：:]\s*/u, "").split("\n")[0])
+  const title = Array.from(
+    taskTitleOf(card)
+      .replace(/^主人[，,：:]\s*/u, "")
+      .split("\n")[0],
+  )
     .slice(0, 36)
     .join("");
   const status =
@@ -102,7 +114,7 @@ function contentOf(card: Card, settled: boolean, title: string) {
   const long = lead.length > 200;
   const preview = long ? Array.from(lead.split("\n")[0]).slice(0, 180).join("") : lead;
   const original = settled || long ? card.text : at < 0 ? "" : card.text.slice(at + marker.length);
-  const details = (title !== card.title ? `${card.title}\n\n` : "") + original;
+  const details = (title !== card.title && taskTitleOf(card) === card.title ? `${card.title}\n\n` : "") + original;
   return [
     ...(!settled && preview
       ? [long ? { tag: "div", text: { tag: "plain_text", content: preview } } : { tag: "markdown", content: preview }]

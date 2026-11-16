@@ -3,6 +3,7 @@
 // all checked at the door. What people wrote stays in the context file, marked as data. Everything else an Agent wants
 // of the hub it writes in a receipt, so it needs no tool, no key and no connection to the hub at all.
 import { InputError } from "../kernel/errors.ts";
+import { formatTaskTitle } from "../kernel/rules.ts";
 import type { Job } from "../protocol/job.ts";
 import { parseResult, type Result } from "../protocol/validate.ts";
 
@@ -28,10 +29,12 @@ function describeEvent({ sourceName, type, subject, link }: Job["context"]["even
 /** The rule's session title: {subject} is the one subject this run's events share, {id} its last part. */
 export function titleOf({ rule, context }: Job) {
   if (!rule.title) return [];
-  const subjects = unique(context.events.map((event) => event.subject).filter(Boolean));
-  const subject = subjects.length === 1 ? subjects[0] : "";
-  const id = subject.split(/[/#:]/).at(-1)!;
-  return [rule.title.replaceAll("{subject}", subject).replaceAll("{id}", id)];
+  return [
+    formatTaskTitle(
+      rule.title,
+      context.events.map((event) => event.subject),
+    ),
+  ];
 }
 
 export function promptFor(job: Job, contextFile: string) {

@@ -19,7 +19,7 @@ import {
   workerOf,
   workers,
 } from "./query.ts";
-import { cronOf, eventRule, ruleOf, SCHEDULE, typeMatches, type Rule, type Rules } from "./rules.ts";
+import { cronOf, eventRule, formatTaskTitle, ruleOf, SCHEDULE, typeMatches, type Rule, type Rules } from "./rules.ts";
 import {
   addUsage,
   ANSWER_BY,
@@ -572,7 +572,19 @@ function nextCard(draft: Draft, channel: string) {
     }
     const attempt = { tries: delivery.tries + 1, first_try_at: firstTry ?? draft.at, not_before: iso(now + MINUTE) };
     put(draft, "deliveries", key, { card_id: card.id, channel, ...attempt });
-    return cardView(card, draft.env, delivery.ref, draft.rules.channels[channel]?.links === true);
+    const shown = cardView(card, draft.env, delivery.ref, draft.rules.channels[channel]?.links === true);
+    const rule = card.rule ? ruleNamed(draft, card.rule) : undefined;
+    // Display metadata must not rewrite a historical card or its answer identity.
+    if (card.kind === "notice" && card.title === card.rule && rule?.title) {
+      return {
+        ...shown,
+        taskTitle: formatTaskTitle(
+          rule.title,
+          eventsOf(draft.view, card.run_id).map((event) => event.subject),
+        ),
+      };
+    }
+    return shown;
   }
   return null;
 }

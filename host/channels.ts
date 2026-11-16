@@ -18,6 +18,8 @@ export type Card = {
   result: string | null;
   link: string | null;
   rule?: string;
+  /** Display-only name for an automatic notice whose stored title is its rule identifier. */
+  taskTitle?: string;
 };
 export type ChannelContext = {
   hub: Pick<Hub, "nextCard" | "delivered" | "failed" | "answer">;

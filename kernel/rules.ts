@@ -17,6 +17,13 @@ export type Tell = "always" | "needed" | "never";
 type EventFilter = { source: string; types: string[] };
 type When = EventFilter | { cron: string };
 type RuleWords = { skill?: string; prompt?: string };
+/** Keep task display and worker naming placeholders on the same event identity. */
+export function formatTaskTitle(template: string, subjects: string[]) {
+  const unique = [...new Set(subjects.filter(Boolean))];
+  const subject = unique.length === 1 ? unique[0] : "";
+  const id = subject.split(/[/#:]/).at(-1)!;
+  return template.replaceAll("{subject}", subject).replaceAll("{id}", id);
+}
 /** A session's name for clients that take it from the first line: {subject} and {id} filled in by the worker. */
 type RuleOptions = RuleWords & {
   title?: string;
