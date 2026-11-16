@@ -12,6 +12,8 @@
 
 本地 Fork 的 `main` 使用原版任务处理方式，默认显示上游飞书卡片，并保留项目标题和卡片编号。Solo to Team 集成已停用，完整实现保存在 `feature/solo-to-team-integration` 分支。
 
+本地同步与升级的验证范围见[本地 Fork 维护](AGENTS.md#本地-fork-维护)。
+
 ## 它解决什么问题？
 
 平时我们用 Claude Code、Codex 这类命令行 Agent，大多是“人守着终端用”：你输一句话，盯着它跑，等它问你下一步；一旦关掉窗口或者人走开，事情就断了。
