@@ -1,8 +1,10 @@
 // Failure modes: a backup or its check fails on a real hub's database, whose indexes call functions only the hub has; a backup
 // taken while the hub runs misses what's in the WAL; a restore leaves the old WAL beside the new database, or drops what's only
 // in the WAL of the folder it reads; a broken master.key or database is restored; a failed restore loses what it replaced, its
-// WAL included; restoring runs while anything has the database open, a hub started some other way or between requests
-// included; a database too broken to read stops the restore that would replace it; a restore runs without being confirmed.
+// WAL included; a restore killed while copying leaves a home without its database, key or config; a database too broken to read
+// stops the restore that would replace it; an empty database is taken for a backup and put in place of a working home; a
+// restore runs while anything has the database open, a hub started some other way or between requests included; a restore runs
+// without being confirmed.
 import assert from "node:assert/strict";
 import { execFile, spawn, spawnSync } from "node:child_process";
 import {
@@ -155,6 +157,30 @@ test("a restore that fails halfway puts everything back, the WAL with its databa
     readdirSync(target).filter((name) => name.startsWith("restore-before-")),
     [],
   );
+});
+
+test("a restore gathers the backup beside the home first, so a copy that fails can't leave the home without one", async () => {
+  const target = folder();
+  withWal(target);
+  const source = folder();
+  withWal(source);
+  mkdirSync(join(source, "config.json"));
+  await assert.rejects(restore(target, source));
+  assert.equal(rows(join(target, "hub.db")), 2, "the database it was going to replace is still there, whole");
+  assert.deepEqual(
+    readdirSync(target).filter((name: string) => name.startsWith("restore-")),
+    [],
+    "and neither folder it made stays behind",
+  );
+});
+
+test("an empty database isn't a backup: nothing is put in its place", async () => {
+  const empty = folder();
+  writeFileSync(join(empty, "hub.db"), "");
+  writeFileSync(join(empty, "master.key"), key);
+  const target = folder();
+  await assert.rejects(restore(target, empty), /空库/);
+  assert.deepEqual(readdirSync(target), [], "nothing was touched");
 });
 
 test("a restore refuses a backup whose key or database is broken", async () => {

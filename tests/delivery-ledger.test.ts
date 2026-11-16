@@ -1,6 +1,8 @@
 // Failure modes: a shared plan drops a repeated reviewer, a policy change reuses the old review, a retry rereviews the
 // same commit or ignores a finding, a new commit is reviewed with the whole branch, a forged description grants a review,
-// an expanded deep-review path reuses an ordinary review, and a fourth round slips through.
+// an expanded deep-review path reuses an ordinary review, a third round with findings doesn't ask the author to rethink
+// the approach, a round after the third stops the delivery or reviews the whole branch again, and a reviewer renamed by the
+// policy (an agent's deep reviewer, or the default raised to the same depth) reviews the whole branch again.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -9,6 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { settings } from "../plugins/delivery/project.ts";
 import { readSharedPolicy, reviewDelivery, selectReview } from "../plugins/delivery/review.ts";
+import { reviewCovers } from "../plugins/delivery/review-policy.ts";
 
 test("a shared policy is read from main and can ask the same reviewer twice", async () => {
   const policy = await readSharedPolicy("example/config:policy.json", (repo) => async (path) => {
@@ -127,10 +130,33 @@ console.log(JSON.stringify({findings:diff.includes('bad change')?[{title:'有问
     assert.match(third, /bad change/);
     assert.match(third, /fix only/);
     assert.match(pr.body, /第 3 轮（[^\n]+，xhigh，审到 /);
+    assert.match(pr.body, /第 3 轮[^\n]+发现 1 条。\n\n已经审了 3 轮[^\n]+换个做法/);
     pr.head.sha = commit("later.txt", "fourth round");
-    assert.match(((await run(false, expandedDepth)) as { blocked: string }).blocked, /已审查 3 轮/);
-    assert.equal(readFileSync(reviewed, "utf8").trim().split("\n").length, 3);
+    pr.body = pr.body.replace(/处理：$/m, "处理：换了做法");
+    assert.deepEqual(await run(false, expandedDepth), []);
+    const fourth = JSON.parse(readFileSync(reviewed, "utf8").trim().split("\n")[3]);
+    assert.match(fourth, /fourth round/);
+    assert.doesNotMatch(fourth, /bad change/);
+    assert.match(pr.body, /第 4 轮[^\n]+没有发现问题/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a round keeps its credit when the same model reviewed at the same depth, whatever the policy named it", () => {
+  const deep = { name: "codex-deep", model: "gpt-6.1-sol", effort: "xhigh" };
+  const plain = { name: "codex", model: "gpt-6.1-sol", effort: "high" };
+  // An agent's deep reviewer, then nobody declared: the default reviewer raised to xhigh by a deep-review path.
+  assert.ok(reviewCovers({ signature: "codex-deep/gpt-6.1-sol@xhigh", effort: "xhigh" }, [plain], ["xhigh"]));
+  assert.ok(reviewCovers({ signature: "gpt-6.1-sol", effort: "xhigh" }, [deep], ["xhigh"]));
+  assert.ok(!reviewCovers({ signature: "gpt-6.1-sol", effort: "high" }, [plain], ["xhigh"]));
+  assert.ok(
+    !reviewCovers({ signature: "codex/gpt-6.1-sol", effort: "high" }, [{ ...plain, model: "other" }], ["high"]),
+  );
+  assert.ok(
+    !reviewCovers({ signature: "codex-deep/gpt-6.1-sol@xhigh", effort: "xhigh" }, [deep, deep], ["xhigh", "xhigh"]),
+  );
+  const command = { name: "custom", command: ["node", "review.mjs"] };
+  const recorded = { signature: `command/${"0".repeat(64)}`, effort: "high" };
+  assert.ok(!reviewCovers(recorded, [command], ["high"]));
 });

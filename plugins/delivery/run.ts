@@ -90,6 +90,11 @@ async function handoff(
     }
     head = io.checkRecovery?.head ?? head;
     const hiccup = isGitHubHiccup(error);
+    // The round's own output keeps the whole message; the board and the commit get the first line of what failed said.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`交付出错：${message}`);
+    const said = String((error as { stderr?: unknown })?.stderr ?? "").trim() || message;
+    const cause = [...(said.split("\n").find((line) => line.trim()) ?? "").trim()].slice(0, 60).join("");
     const canReturn = !!pr && hasLabel(pr, "deliver");
     const retry = retryHandoff(
       timers,
@@ -101,12 +106,15 @@ async function handoff(
     );
     if (retry) {
       if (head) await io.report?.("retrying", head, { detail: hiccup ? "github" : "execution" });
-      return { text: hiccup ? "GitHub 暂时出错，一分钟后接着查" : "交付步骤暂时出错，一分钟后接着查", retry };
+      return {
+        text: hiccup ? "GitHub 暂时出错，一分钟后接着查" : `交付步骤暂时出错（${cause}），一分钟后接着查`,
+        retry,
+      };
     }
     if (!canReturn) return { text: "暂时读不到交付请求，请稍后重交", exit: 2 };
     try {
       return await sendBack(
-        hiccup ? "GitHub 连续约一小时出错，请稍后重交" : "交付连续五次尝试都卡住了，请稍后重交",
+        hiccup ? "GitHub 连续约一小时出错，请稍后重交" : `交付连续五次尝试都卡住了（${cause}），请稍后重交`,
         hiccup ? "github" : "execution",
       );
     } catch {

@@ -75,8 +75,37 @@ export function selectReview(
   return reviewer ? [{ name: "codex", ...reviewer }] : [];
 }
 
+const DEFAULT_MODEL = "gpt-6.1-sol";
+const commandPlan = (command: string[]) =>
+  `command/${createHash("sha256").update(JSON.stringify(command)).digest("hex")}`;
+
+/**
+ * Whether a recorded round already did the review these reviewers would do now. A round's credit is what ran (each
+ * reviewer's command, or its model at the depth it ran), not what the policy called it: an agent's deep reviewer and
+ * the default reviewer raised to the same depth by a deep-review path are the same review.
+ */
+export function reviewCovers(
+  round: { signature: string; effort: string },
+  reviewers: NamedReviewer[],
+  efforts: string[],
+) {
+  const ran = round.effort.split(" + ");
+  const done = round.signature.split(" + ").map((entry, index) => {
+    // Entries are "command/hash", "name/model[@configured depth]", or a bare model from older rounds; the depth that ran is
+    // recorded apart.
+    const plan = entry.startsWith("command/") || !entry.includes("/") ? entry : entry.slice(entry.indexOf("/") + 1);
+    return `${plan.replace(/@[a-z]+$/, "")}@${ran[index]}`;
+  });
+  return reviewers.every(({ command, model = DEFAULT_MODEL }, index) => {
+    const at = done.indexOf(`${command ? commandPlan(command) : model}@${efforts[index]}`);
+    if (at < 0) return false;
+    done.splice(at, 1);
+    return true;
+  });
+}
+
 export function reviewSignature(reviewers: NamedReviewer[]) {
-  const model = "gpt-6.1-sol";
+  const model = DEFAULT_MODEL;
   if (reviewers.length === 1) {
     const [reviewer] = reviewers;
     // Match the name that older rounds used for the default plan.
@@ -90,7 +119,7 @@ export function reviewSignature(reviewers: NamedReviewer[]) {
   }
   return reviewers
     .map(({ name, model: selected = model, effort = "high", command }) => {
-      if (command) return `command/${createHash("sha256").update(JSON.stringify(command)).digest("hex")}`;
+      if (command) return commandPlan(command);
       return `${name}/${selected}${effort === "high" ? "" : `@${effort}`}`;
     })
     .join(" + ");

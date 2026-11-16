@@ -23,6 +23,7 @@ const env: NodeJS.ProcessEnv = {
 delete env.AGENT_AUTOLOOP_RULES;
 delete env.AGENT_AUTOLOOP_PUBLIC_URL;
 delete env.AGENT_AUTOLOOP_COMMIT;
+delete env.AGENT_AUTOLOOP_RELEASE;
 const cli = path.join(home, "app/bin/agent-autoloop.ts");
 let up: ChildProcess | undefined;
 const run = (...args: string[]) => {

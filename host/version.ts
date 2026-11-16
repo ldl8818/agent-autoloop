@@ -19,8 +19,14 @@ export function commitOf(root = ROOT) {
   }
 }
 
-/** The release this commit is, if it is one. A try-out tag left on the same commit gives way to the release it became. */
+/**
+ * The release this commit is, if it is one. A try-out tag left on the same commit gives way to the release it became.
+ * A deployment unpacked from a tag has no tag of its own: the environment it was started with carries it, the way
+ * `AGENT_AUTOLOOP_COMMIT` carries the commit. A value that isn't a version counts for nothing.
+ */
 export function releaseOf(root = ROOT) {
+  const fromEnv = process.env.AGENT_AUTOLOOP_RELEASE?.trim();
+  if (fromEnv) return /^v\d+\.\d+\.\d+(-[a-z0-9.]+)?$/.test(fromEnv) ? fromEnv : null;
   try {
     if (!existsSync(path.join(root, ".git"))) return null;
     const args = ["-C", root, "tag", "--points-at", "HEAD"];

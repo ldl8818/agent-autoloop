@@ -7,7 +7,8 @@
 // failed; a run over its time or told to stop goes on, or leaves its children behind; the hub is told it stopped before it
 // has; more than capacity at once are taken; a claim is thrown away before its job has arrived; a receipt that can't be read
 // redoes the work, isn't asked for again, is asked for without end, or is dropped without telling the owner; a session that
-// can't be gone on in fails the run instead of starting a new one, or keeps trying; a turn that went on in its session and
+// can't be gone on in fails the run instead of starting a new one, or keeps trying, or, when the new one won't start either,
+// hands back the session made up for it, so the retry can't go back to the old one; a turn that went on in its session and
 // then broke, said nothing, or vanished is run again in a new one, or loses that session; a turn's end that doesn't exit holds its
 // place for ever; an old turn's exit is taken for a new one's; the hub gone for ten minutes isn't told, told every minute,
 // taken as told when the telling failed, tried without end, or not told again after it came back and went away again.
@@ -655,10 +656,16 @@ test("a session that can't be gone on in starts a new one, once", async () => {
     ["done", "开了新会话也做完了", "new"],
   );
   const failing = fakeHub();
-  failing.jobs.push(job({ use: "scripted", command: ["echo nope >&2; exit 1"], session: "old" }));
+  // Alive for a while, so the worker sees it running and says which session it's in before it fails.
+  failing.jobs.push(job({ use: "scripted", command: ["sleep 0.5; echo nope >&2; exit 1"], session: "old" }));
   const f = worker(failing);
   await until(f, () => failing.results.length === 1);
   assert.deepEqual([failing.results[0].outcome, failing.results[0].error], ["failed", "nope"]);
+  assert.equal(failing.results[0].session, undefined, "the hub keeps the old session for the retry");
+  assert.ok(
+    failing.starts.every(({ session }) => session === "old"),
+    "nothing made up here is handed in as started",
+  );
 });
 
 test("a turn that went on in its session and then broke stays there, and its prompt isn't run again", async () => {

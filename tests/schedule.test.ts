@@ -5,7 +5,8 @@
 // the card stays after it's fixed; a rules file that is gone stops the hub, or isn't picked up when it's moved back, or
 // brings back a card the owner closed at every tick.
 // Cancelling a timer that isn't waiting spoils the receipt it's in; a timer coming due after its rule has gone stops the
-// clock for everything else, or starts something; a clock set back runs the same scheduled moment a second time.
+// clock for everything else, starts something, or goes by without telling the owner; a clock set back runs the same
+// scheduled moment a second time.
 import assert from "node:assert/strict";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,7 +19,7 @@ writeFileSync(rulesFile, readFileSync(process.env.AGENT_AUTOLOOP_RULES!, "utf8")
 process.env.AGENT_AUTOLOOP_RULES = rulesFile;
 const { execute, reloadRules, tick } = await import("./hub.ts");
 const { ingest } = await import("./hub.ts");
-const { claimNext, finish, started, heartbeat } = await import("./hub.ts");
+const { claimNext, finish, started, heartbeat, cancel } = await import("./hub.ts");
 const { all, one, run } = await import("./storage.ts");
 
 const clean = () => {
@@ -98,6 +99,11 @@ test("a run's look-again fires once at its time, on its thread, in its session, 
   keepWorkersHere(at(60));
   tick(at(60));
   tick(at(60.5));
+  assert.equal(
+    all("SELECT id FROM timers WHERE event_id IS NOT NULL").length,
+    1,
+    "the fired timer stays until its run is handled",
+  );
   // 11:00 is also when the five-minutely rule comes due, on the same worker.
   const poll = claim("w1", at(61))!;
   assert.equal(poll.rule.name, "巡检");
@@ -124,6 +130,35 @@ test("a run's look-again fires once at its time, on its thread, in its session, 
     1,
     "the fired one doesn't stop a new one under its key",
   );
+  assert.equal(
+    all("SELECT id FROM timers").length,
+    1,
+    "once the linked run is terminal, the old row is removed from the live projection",
+  );
+  const fired = all<{ fact: string }>("SELECT fact FROM facts")
+    .flatMap(({ fact }) => JSON.parse(fact).changes)
+    .find(
+      (change) => change.table === "timers" && change.row?.about === "看原站恢复了没有" && change.row.event_id !== null,
+    );
+  assert.ok(fired, "the facts log keeps the timer and event link after the projection row is removed");
+});
+
+test("cancelling a queued timer run removes its fired timer from the live projection", () => {
+  clean();
+  ingest("app", { id: "1", type: "feedback.new", subject: "#1" }, at(0));
+  const job = claim("w1", at(0))!;
+  finish(
+    job.run,
+    job.token,
+    { outcome: "done", later: [{ key: "recheck", at: new Date(at(60)).toISOString(), about: "看原站恢复了没有" }] },
+    at(1),
+  );
+  keepWorkersHere(at(59));
+  tick(at(60));
+  assert.equal(all("SELECT id FROM timers WHERE event_id IS NOT NULL").length, 1);
+  const queued = one<{ id: number }>("SELECT id FROM runs WHERE rule = '意见' AND state = 'queued'")!;
+  cancel(queued.id, at(61));
+  assert.equal(all("SELECT id FROM timers").length, 0);
 });
 
 test("the same key moves a timer; another thread has its own; a run sees what's waiting and can cancel it", () => {
@@ -175,7 +210,7 @@ test("cancelling a look-again that isn't waiting changes nothing, and the rest o
   );
 });
 
-test("a look-again coming due after its rule has gone is kept on record, starts nothing and doesn't stop the clock", () => {
+test("a look-again coming due after its rule has gone is kept on record, starts nothing, tells the owner and doesn't stop the clock", () => {
   clean();
   ingest("app", { id: "1", type: "feedback.new", subject: "#1" }, at(0));
   const job = claim("w1", at(0))!;
@@ -191,6 +226,16 @@ test("a look-again coming due after its rule has gone is kept on record, starts 
     assert.deepEqual(JSON.parse(event.routed), []);
     assert.deepEqual(all("SELECT id FROM timers WHERE event_id IS NULL"), [], "it doesn't come due again");
     assert.deepEqual(all("SELECT id FROM runs WHERE rule = '意见' AND state = 'queued'"), []);
+    assert.equal(
+      all("SELECT id FROM timers").length,
+      0,
+      "no run needs the timer context after the notice has been created",
+    );
+    const told = all<{ title: string; text: string }>("SELECT title, text FROM cards WHERE state = 'open'");
+    assert.equal(told.length, 1);
+    assert.equal(told[0].title, "意见");
+    assert.match(told[0].text, /规则「意见」不在了/);
+    assert.match(told[0].text, /看原站恢复了没有/);
   } finally {
     writeFileSync(rulesFile, before);
     reloadRules();

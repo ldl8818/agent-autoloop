@@ -2,6 +2,7 @@
 // `issue.close`, `push`, `note` and so on, the object's number as the subject. In rules.json:
 //   "sources": { "gitlab": { "name": "GitLab", "adapter": "gitlab" } }, and AGENT_AUTOLOOP_SECRET_GITLAB in secrets.env.
 import { createHash, timingSafeEqual } from "node:crypto";
+import { fit } from "../../worker/contract.ts";
 
 type Input = { headers: Record<string, string | string[] | undefined>; body: string; secret: string };
 
@@ -23,8 +24,8 @@ export default function gitlab({ headers, body, secret }: Input) {
       id: String(headers["idempotency-key"] ?? createHash("sha256").update(body).digest("hex")),
       type,
       subject: `${repo}${number}`.replace(/[^A-Za-z0-9#._:/@-]/g, "-").slice(0, 100),
-      summary: String(attributes.title ?? payload.commits?.[0]?.message ?? "").slice(0, 200),
-      detail: String(attributes.description ?? attributes.note ?? "").slice(0, 4000),
+      summary: fit(String(attributes.title ?? payload.commits?.[0]?.message ?? ""), 200),
+      detail: fit(String(attributes.description ?? attributes.note ?? ""), 4000),
       link: encodeURI(String(attributes.url ?? project.web_url ?? "")).slice(0, 500),
     },
   ];

@@ -642,7 +642,14 @@ async function doctor() {
           say(!problem, problem ?? `${agent.name} 可以用`);
         }
       }
-      for (const channel of state.channels) say(channel.online, `${channel.name}${channel.online ? "在线" : "不在线"}`);
+      for (const channel of state.channels) {
+        say(channel.online, `${channel.name}${channel.online ? "在线" : "不在线"}`);
+        const failure = channel.lastFailure;
+        if (!failure) continue;
+        // Not "still retrying": a card closed before it got through is never tried again, though its failure stays the last.
+        const tried = `试了 ${failure.tries} 次${failure.givenUp ? "，已经不再重试" : ""}`;
+        say(false, `${channel.name}最近一张卡片（#${failure.card}）没送到：${failure.error}（${tried}）`);
+      }
       const manual = path.join(ROOT, "skills", "agent-autoloop", "SKILL.md");
       if (!state.channels.length) {
         console.log(`○ 还没接通道：Agent 问你时不会主动告诉你，要自己运行 agent-autoloop status 看。接法见 ${manual}`);

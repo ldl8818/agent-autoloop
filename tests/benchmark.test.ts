@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { checkPolls, observe, dispatchLatency, percentile, timed } from "../scripts/metrics.ts";
 
 test("a thousand completed requests cannot stand in for a thousand waiting ones", () => {
-  assert.throws(() => checkPolls({ active: 0, peak: 1 }, 1000), /1000/);
+  assert.throws(() => checkPolls({ active: 0, peak: 1000 }, 1000), /1000/);
   assert.throws(() => checkPolls({ active: 999, peak: 999 }, 1000), /1000/);
   assert.throws(() => checkPolls({ active: 1000, peak: 1000 }, 999), /1000/);
   checkPolls({ active: 1000, peak: 1000 }, 1000);

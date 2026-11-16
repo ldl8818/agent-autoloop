@@ -4,11 +4,11 @@
 // in place of a worker key; an oversized or non-JSON body is read; health doesn't say which commit is running; state is open
 // to anyone; a worker tells as a task that isn't its own, or one matter twice; a channel answers without being on the list;
 // a cookie or a sign-in opens anything; someone other than the owner reads everything, answers, resolves or stops; looking
-// at a card's link answers it; a card's words run as markup or the page loads a script; Enter in the text box picks the first
-// option; a card link answers more than its card; a webhook with a bad signature is taken, or one without an adapter; a
-// webhook's secret leaks into anything it returns; the owner's key opens the worker's door; a page other than a card's exists;
-// a card's link still answers or shows the card after its week, or sends you to a command that doesn't work; a link opens
-// when no channel takes links.
+// at a card's link answers it; a card's words run as markup or the page loads a script; Enter in the text box picks the
+// first option; a card link answers more than its card; a notice's note is made mandatory; a webhook with a bad signature is
+// taken, or one without an adapter; a webhook's secret leaks into anything it returns; the owner's key opens the worker's
+// door; a page other than a card's exists; a card's link still answers or shows the card after its week, or sends you to a
+// command that doesn't work; a link opens when no channel takes links.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -387,6 +387,7 @@ test("a card's link takes words of your own, and a notice takes a line of its ow
   assert.equal(page.text.split("<form").length - 1, 2);
   assert.ok(page.text.includes("已处理"));
   assert.ok(page.text.includes("记录并结案"), "a notice can be settled with a line of your own");
+  assert.ok(!page.text.split("<form")[2].includes("required"), "a notice's note may be left blank");
   assert.equal((await form(told.path, `text=${encodeURIComponent("清了 3GB 缓存")}`)).status, 303);
   assert.equal(stored(told.id).state, "closed");
   assert.equal(stored(told.id).answer, "清了 3GB 缓存", "the line is kept with the card");

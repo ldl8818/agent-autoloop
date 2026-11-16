@@ -95,7 +95,8 @@ export function formatWhy(id: number, facts: Fact[]) {
       }
       if (table === "runs" && row?.id === id) tellRun(fact, row, before, receipt);
       if (table === "cards" && row) tellCard(row, before, receipt);
-      if (receipt && table === "timers") {
+      // A look-again that already came due leaves the projection once its run ends; that is not a cancellation.
+      if (receipt && table === "timers" && (row || before?.event_id == null)) {
         add(fact.at, row ? `安排复查：${row.about}；时间 ${time(row.at)}` : `取消复查：${before?.key ?? key}`);
       }
       if (receipt && table === "events" && row && !before && !events.has(row.id)) {

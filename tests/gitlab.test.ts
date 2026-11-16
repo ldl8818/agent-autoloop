@@ -1,6 +1,7 @@
 // GitLab webhooks. Failure modes: a wrong or missing token is taken; the action isn't in the event's type; a retried
 // delivery counts twice; a later event on the same merge request is dropped as a duplicate of an earlier one;
-// comments on different issues or merge requests collapse into the same repository-wide subject.
+// comments on different issues or merge requests collapse into the same repository-wide subject; a description or title
+// long enough to be capped is cut through the middle of a character, so its last glyph reaches the agent as garbage.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import gitlab from "../plugins/gitlab/source.ts";
@@ -35,6 +36,28 @@ test("gitlab: a merge request event carries its action, subject and words", () =
   assert.equal(event.detail, "Fixes the login flow for mobile.");
   assert.equal(event.link, "https://gitlab.com/org/proj/merge_requests/42");
   assert.equal(event.id, "evt-12345");
+
+  // The same cap as GitHub's, with an emoji across it: units 199/200 for the summary and 3999/4000 for the detail,
+  // so a cut that lands on the first half would hand the agent a lone surrogate instead of a character.
+  const long = `${"A".repeat(199)}😀${"A".repeat(3798)}😀keep the rest of this comment`;
+  const [capped] = gitlab({
+    headers: headers(),
+    body: JSON.stringify({
+      object_kind: "merge_request",
+      object_attributes: {
+        iid: 42,
+        action: "open",
+        title: long,
+        description: long,
+        url: "https://gitlab.com/org/proj/merge_requests/42",
+      },
+      project: { path_with_namespace: "org/proj", web_url: "https://gitlab.com/org/proj" },
+    }),
+    secret,
+  });
+  assert.equal(capped.summary, "A".repeat(199), "capped, and not through the emoji at the cut");
+  assert.equal(capped.detail.length, 3999, "capped, one unit short of the half character");
+  assert.ok(!/[\ud800-\udbff]$/.test(capped.detail), "not cut through a character");
 });
 
 test("gitlab: a push has no number in its subject", () => {

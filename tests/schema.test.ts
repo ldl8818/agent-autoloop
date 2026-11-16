@@ -42,6 +42,7 @@ test("wire schemas agree with event and receipt boundaries", () => {
     { id: "one", type: "app.changed", source: "other" },
     { id: 7, type: "invalid" },
     { id: "one", type: "bad type" },
+    { id: "one", type: "app.changed", subject: "有中文" },
   ]) {
     let accepted = true;
     try {
@@ -58,6 +59,10 @@ test("wire schemas agree with event and receipt boundaries", () => {
     { outcome: "done", ask: [{ title: "选", text: "内容", options: ["一"] }] },
     { outcome: "done", ask: [{ title: "选", text: "内容", options: ["一", "二"], recommend: 2 }] },
     { outcome: "done", later: [{ key: "k", at: "badZ", about: "后来" }] },
+    { outcome: "done", bogus: 1 },
+    { outcome: "done", summary: "x".repeat(501) },
+    { outcome: "done", events: [{ id: "x", type: "app.changed", link: "/tmp/notes.md" }] },
+    { outcome: "done", later: [{ key: "k", cancel: true, at: "2026-11-06T16:00:00+08:00" }] },
   ]) {
     let accepted = true;
     try {

@@ -48,16 +48,21 @@ function readableBackup(source: string) {
   if (!existsSync(database) || !existsSync(key)) throw new Error(`这个目录不像备份：缺 ${DB} 或 ${KEY}`);
   if (!KEY_SHAPE.test(readFileSync(key, "utf8").trim())) throw new Error("备份里的 master.key 坏了");
   let result: unknown;
+  let tables = 0;
   try {
     const check = new DatabaseSync(database);
     try {
       // Not integrity_check: that one evaluates the indexes too, and so needs the hub's functions.
       result = Object.values(check.prepare("PRAGMA quick_check").get() ?? {})[0];
+      // An empty file passes quick_check: SQLite reads it as a database with nothing in it, and restoring one would put a
+      // home in place that has no tables at all.
+      tables = (check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get() as { n: number }).n;
     } finally {
       check.close();
     }
   } catch {}
   if (result !== "ok") throw new Error("备份里的 hub.db 读不出来");
+  if (!tables) throw new Error("备份里的 hub.db 是空库");
 }
 
 /** Whether anything has the database open, a hub between requests included: only then is this lock out of reach. */
@@ -82,29 +87,46 @@ export async function restore(home: string, source: string) {
   }
   readableBackup(source);
   privateDirectory(home);
-  const safety = path.join(home, `restore-before-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-  mkdirSync(safety, { mode: 0o700 });
-  // The WAL belongs to the file that's leaving: a stale one next to the restored database would be applied to it. A file
-  // the backup doesn't have stays as it is.
-  const replaced = [DB, `${DB}-wal`, `${DB}-shm`, ...FILES.filter((name) => existsSync(path.join(source, name)))];
-  for (const name of replaced) {
-    const from = path.join(home, name);
-    if (existsSync(from)) renameSync(from, path.join(safety, name));
-  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const staged = path.join(home, `restore-new-${stamp}`);
+  const safety = path.join(home, `restore-before-${stamp}`);
+  // The backup is gathered beside the home first, and only then swapped in. While pages are being copied nothing in the home
+  // has moved, so a restore killed in the middle of the copy (a SIGKILL, a power cut) leaves the old database where it was.
+  mkdirSync(staged, { mode: 0o700 });
   try {
-    await copyDatabase(path.join(source, DB), path.join(home, DB));
-    for (const name of replaced.filter((name) => FILES.includes(name))) {
-      copyFileSync(path.join(source, name), path.join(home, name));
-      chmodSync(path.join(home, name), 0o600);
+    await copyDatabase(path.join(source, DB), path.join(staged, DB));
+    for (const name of FILES.filter((name) => existsSync(path.join(source, name)))) {
+      copyFileSync(path.join(source, name), path.join(staged, name));
+      chmodSync(path.join(staged, name), 0o600);
     }
   } catch (error) {
-    // Half a restore is worse than none: everything goes back as it was, the WAL with its database.
-    for (const name of replaced) {
-      rmSync(path.join(home, name), { force: true });
-      if (existsSync(path.join(safety, name))) renameSync(path.join(safety, name), path.join(home, name));
-    }
-    rmSync(safety, { recursive: true });
+    rmSync(staged, { recursive: true, force: true });
     throw error;
+  }
+  // The WAL belongs to the file that's leaving: a stale one next to the restored database would be applied to it. A file the
+  // backup doesn't have stays as it is.
+  const replaced = [DB, `${DB}-wal`, `${DB}-shm`, ...FILES.filter((name) => existsSync(path.join(staged, name)))];
+  mkdirSync(safety, { mode: 0o700 });
+  try {
+    for (const name of replaced) {
+      const from = path.join(home, name);
+      if (existsSync(from)) renameSync(from, path.join(safety, name));
+    }
+    for (const name of replaced) {
+      const from = path.join(staged, name);
+      if (existsSync(from)) renameSync(from, path.join(home, name));
+    }
+  } catch (error) {
+    // Half a restore is worse than none: everything goes back as it was, the WAL with its database. This covers the moves
+    // out of the home too, which used to sit outside the rollback.
+    for (const name of readdirSync(safety)) {
+      rmSync(path.join(home, name), { force: true });
+      renameSync(path.join(safety, name), path.join(home, name));
+    }
+    rmSync(safety, { recursive: true, force: true });
+    throw error;
+  } finally {
+    rmSync(staged, { recursive: true, force: true });
   }
   return { safety };
 }

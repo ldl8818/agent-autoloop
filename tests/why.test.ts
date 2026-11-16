@@ -1,6 +1,6 @@
 // Failure modes: why dumps rules or JSON by default; related runs/events leak into the timeline; a question loses its
 // answer or continuation; receipt actions disappear; retry uses the wrong rules version; --json changes the raw facts;
-// local time is replaced by UTC or a year, columns drift; a provisional session link is presented after the agent has supplied its real session.
+// local time is replaced by UTC or a year, columns drift; a provisional session link is presented after the agent has supplied its real session; a look-again that came due and ran is shown as cancelled.
 import assert from "node:assert/strict";
 import { rows } from "../kernel/evolve.ts";
 import { execFile } from "node:child_process";
@@ -117,4 +117,21 @@ test("why retains failed attempts and uses each attempt's rules version without 
   assert.ok(output.includes(`规则版本 #${before}`));
   assert.ok(output.includes(`规则版本 #${afterVersion}`));
   assert.ok(!output.includes("private-instructions"));
+});
+test("why does not show a look-again that came due and ran as cancelled", async () => {
+  const due = Date.parse("2026-11-05T00:00:00Z");
+  hub.ingest("shop", { id: "order-77", type: "order.created", subject: "order-77" }, due - 60000);
+  const first = hub.claimNext("mac-mini", "look-1", due - 59000)!;
+  const later = [{ key: "recheck", at: new Date(due).toISOString(), about: "再看一眼库存" }];
+  hub.finish(first.run, first.token, { outcome: "done", later }, due - 58000);
+  hub.tick(due);
+  let job = hub.claimNext("mac-mini", "look-2", due + 1000)!;
+  while (!job.context.timers.length) {
+    hub.finish(job.run, job.token, { outcome: "done" }, due + 1500);
+    job = hub.claimNext("mac-mini", "look-3", due + 1600)!;
+  }
+  hub.finish(job.run, job.token, { outcome: "done", summary: "看过了" }, due + 2000);
+  const output = await cli("why", String(job.run));
+  assert.ok(output.includes("看过了"), output);
+  assert.ok(!output.includes("取消复查"), output);
 });

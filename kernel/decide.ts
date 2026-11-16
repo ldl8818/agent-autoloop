@@ -337,17 +337,48 @@ function claimNext(draft: Draft, worker: string, claim: string) {
   return jobOf(draft.view, draft.view.get("runs", run.id)!, draft.env);
 }
 
+function clearFiredTimers(draft: Draft, run: Row) {
+  // A fired timer supplies context to its queued/retrying run; keep it until no future claim can need that context.
+  // The facts log retains the full timer row and its event link after this projection entry is removed.
+  const eventIds = eventsOf(draft.view, run.id).map((event) => event.id);
+  if (!eventIds.length) return;
+  for (const timer of rows(draft.view, "timers", { event_id: eventIds })) set(draft, "timers", timer.id, null);
+}
+
 /** Ends a run nothing will pick up again, and says so. */
 function stopRun(draft: Draft, run: Row, why: string, summary: string, words: string) {
   put(draft, "runs", run.id, { state: "cancelled", finished_at: draft.at, summary });
+  clearFiredTimers(draft, run);
   closeStopped(draft, run.id, summary);
   notify(draft, `run:${run.id}:${why}`, run.rule, words, threadOf(run));
 }
 
-const ruleGone = (run: Row): [string, string] => [
-  `规则「${run.rule}」不在了，不再派发`,
-  `规则「${run.rule}」不在了（删掉或改名了），排着的这一轮不再派发。还要做的话重新触发这件事。`,
+const ruleGone = (rule: string, what = "排着的这一轮"): [string, string] => [
+  `规则「${rule}」不在了，不再派发`,
+  `规则「${rule}」不在了（删掉或改名了），${what}不再派发。还要做的话重新触发这件事。`,
 ];
+/** Enough of what a look-again was for to know it again: it can run to thousands of characters. */
+function opening(about: string) {
+  const chars = [...about.replace(/\s+/g, " ").trim()];
+  return chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : chars.join("");
+}
+
+/**
+ * What a card about a failing run shows of its error: an agent's error can run to 500 characters over several lines, which a
+ * phone can't make sense of. Agents hand back the end of what they printed, the reason last, so the last line, and the end
+ * of it when it's long; the whole of it stays on the run, for `why`.
+ */
+function briefError(error: string, run: number) {
+  const line =
+    error
+      .split("\n")
+      .findLast((part) => part.trim())
+      ?.trim() ?? error;
+  const characters = [...line];
+  if (characters.length <= 120 && line === error) return error;
+  const cut = characters.length > 120 ? `…${characters.slice(-120).join("")}` : line;
+  return `${cut}（完整原因：agent-autoloop why ${run}）`;
+}
 
 /** A run that didn't get through waits to try again, and takes along whatever came in for the same thing meanwhile. */
 function retryLater(draft: Draft, run: Row, result: Result) {
@@ -364,13 +395,13 @@ function retryLater(draft: Draft, run: Row, result: Result) {
   const failure = { attempts, error, ...unclaimed };
   if (!ruleNamed(draft, run.rule)) {
     put(draft, "runs", id, failure);
-    stopRun(draft, run, "rule-gone", ...ruleGone(run));
+    stopRun(draft, run, "rule-gone", ...ruleGone(run.rule));
     return rejected;
   }
   if (attempts >= MAX_ATTEMPTS) {
     // Runs queued for this thread stay apart: they came in since, and get their own count and their own go.
     const summary = `连续 ${MAX_ATTEMPTS} 次没跑成，不再自动重试`;
-    const words = `连续 ${MAX_ATTEMPTS} 次自动处理没跑完（卡在：${error}），不再自动重试。解决后重新触发这件事，它会从头开始。`;
+    const words = `连续 ${MAX_ATTEMPTS} 次自动处理没跑完（卡在：${briefError(error, id)}），不再自动重试。解决后重新触发这件事，它会从头开始。`;
     put(draft, "runs", id, failure);
     stopRun(draft, run, "stopped", summary, words);
     return rejected;
@@ -388,7 +419,7 @@ function retryLater(draft: Draft, run: Row, result: Result) {
   if (!result.notice?.some((notice) => !notice.fyi) && attempts === 3) {
     const clock = { timeZone: draft.rules.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" } as const;
     const time = new Intl.DateTimeFormat("zh-CN", clock).format(notBefore);
-    const words = `连续 3 次自动处理没跑完（卡在：${error}），${time} 会自动再试。`;
+    const words = `连续 3 次自动处理没跑完（卡在：${briefError(error, id)}），${time} 会自动再试。`;
     notify(draft, `run:${id}:failing`, run.rule, words, threadOf(run));
   }
   assignQueued(draft, draft.view.get("runs", id)!);
@@ -450,6 +481,7 @@ function applyReceipt(draft: Draft, run: Row, result: Result) {
   }
   // The source whose event this run took reads them back (`eventOutcome`); nothing else links them to the run.
   if (emitted.length) put(draft, "runs", id, { emitted: JSON.stringify(emitted) });
+  clearFiredTimers(draft, run);
   return rejected;
 }
 
@@ -477,6 +509,7 @@ function finish(draft: Draft, id: number, token: string, given: unknown) {
       summary: result.summary ?? "",
       cancel_at: null,
     });
+    clearFiredTimers(draft, run);
     closeStopped(draft, id, "已停止");
   } else if (result.outcome === "failed") rejected = retryLater(draft, run, result);
   else rejected = applyReceipt(draft, run, result);
@@ -581,8 +614,14 @@ function tick(draft: Draft) {
     const rule = ruleNamed(draft, timer.rule);
     const event = { id: `timer:${timer.id}`, type: "timer.due", subject: timer.lane, hops: timer.hops ?? 0 };
     const eventId = recordEvent(draft, timer.source, event, rule ? [rule.name] : []);
-    put(draft, "timers", timer.id, { event_id: eventId });
-    if (rule) enqueue(draft, rule, eventId, timer.lane, timer.agent === rule.to ? timer.session : null);
+    if (rule) {
+      put(draft, "timers", timer.id, { event_id: eventId });
+      enqueue(draft, rule, eventId, timer.lane, timer.agent === rule.to ? timer.session : null);
+    } else {
+      const [, words] = ruleGone(timer.rule, `到期的复查「${opening(timer.about)}」`);
+      notify(draft, `timer:${timer.id}:rule-gone`, timer.rule, words, { rule: timer.rule, lane: timer.lane });
+      set(draft, "timers", timer.id, null);
+    }
   }
   sweep(draft);
 }
@@ -695,7 +734,7 @@ const HANDLERS: Record<string, (draft: Draft, ...args: any[]) => unknown> = {
     put(draft, "config", "rules", { value: rules, version: draft.seq });
     for (const run of rows(draft.view, "runs", { state: "queued" })) {
       if (ruleOf(rules, run.rule)) assignQueued(draft, run);
-      else stopRun(draft, run, "rule-gone", ...ruleGone(run));
+      else stopRun(draft, run, "rule-gone", ...ruleGone(run.rule));
     }
     closeOpen(draft, (key) => key.startsWith("rules:"), "改好了");
   },
@@ -761,6 +800,7 @@ const HANDLERS: Record<string, (draft: Draft, ...args: any[]) => unknown> = {
     if (!run) throw new NotFound("没有这一轮");
     if (run.state === "queued") {
       put(draft, "runs", id, { state: "cancelled", finished_at: draft.at });
+      clearFiredTimers(draft, run);
       closeStopped(draft, id, "已停止");
     } else if (run.state === "claimed") put(draft, "runs", id, { cancel_at: draft.at });
     else throw new InputError("这一轮已经结束了");
@@ -809,7 +849,7 @@ const HANDLERS: Record<string, (draft: Draft, ...args: any[]) => unknown> = {
         : delivery.tries >= RESEND_AT.length
           ? { given_up: 1 }
           : { not_before: iso(firstTry + RESEND_AT[delivery.tries] * MINUTE) };
-    put(draft, "deliveries", `${id}:${channel}`, { ...next, error: String(error).slice(0, 300) });
+    put(draft, "deliveries", `${id}:${channel}`, { ...next, error: [...String(error)].slice(0, 300).join("") });
   },
   sweep,
   tick,

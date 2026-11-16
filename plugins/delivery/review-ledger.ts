@@ -69,8 +69,15 @@ export function renderRound(
 ) {
   const header = `第 ${current.rounds.length + 1} 轮（${signature}，${effort.join(" + ")}，审到 ${head}）：`;
   if (!findings.length) return `${header}没有发现问题。`;
+  const round = current.rounds.length + 1;
   return [
     `${header}发现 ${findings.length} 条。`,
+    // Patching the same spot round after round rarely converges. Later rounds still review only the new commits.
+    ...(round >= REVIEW_ROUNDS
+      ? [
+          `\n已经审了 ${round} 轮还有问题，先退一步想想是不是要换个做法。换做法就推新提交，下一轮只审新改的部分；不换就在每条的“处理：”后写清不改的理由。`,
+        ]
+      : []),
     ...findings.map(({ title, text }, index) => {
       const body = text
         .replaceAll("\r\n", "\n")

@@ -69,6 +69,7 @@ function install() {
     "AGENT_AUTOLOOP_RULES",
     "AGENT_AUTOLOOP_PUBLIC_URL",
     "AGENT_AUTOLOOP_COMMIT",
+    "AGENT_AUTOLOOP_RELEASE",
   ])
     delete env[name];
   const program = join(app, "bin", "agent-autoloop.ts");

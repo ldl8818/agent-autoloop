@@ -9,7 +9,7 @@
 // what was done once its run finishes; a run resolves a card outside what it was given to check, or a bad id spoils its own
 // result; resolving wakes nobody. Delivery: a channel gets a card it has, gets none it should, loses a report and sends a second
 // message (the ref sticks, and a stale report doesn't undo a newer one); a stale failure delays a newer version; a failed
-// send retries at once, or for ever; a channel that never came counts as having failed; a card solved before it was sent
+// send retries at once, or for ever; the failure text it keeps ends on half a character; a channel that never came counts as having failed; a card solved before it was sent
 // bothers the owner; two channels don't each get their own copy; an answer in one channel doesn't update the other.
 // Words on an answer or a notice that aren't text crash instead of being refused; an answer to a card whose rule has gone
 // crashes or starts something; closing or reporting a failure on a card that isn't there, or wasn't handed over, crashes.
@@ -17,6 +17,7 @@
 // in meanwhile loses the session of the answer in it, or has it wiped by what had none. A run with events from two
 // sources is given, or closes, cards that have no source. A channel that takes a card and never reports gets it for ever.
 // A card closed while its first message is on the way never gets that message updated.
+// A channel whose program keeps coming but whose last card didn't get through looks fine in the state (issue #290).
 // A rule that lists its channels has its cards, and the notices of its runs, sent to others as well; one that lists none
 // stops reaching every channel; a notice of nobody's rule reaches only some. With defaultChannels, a card that names no
 // channels of its own (a tell, the hub's own alert, a task elsewhere asking, a rule without a list) still reaches every
@@ -35,7 +36,7 @@ import { formatWhy } from "../cli/why.ts";
 setup("cards");
 const { ingest } = await import("./hub.ts");
 const { cancel, claimNext, execute, finish, heartbeat, started, sweep, why } = await import("./hub.ts");
-const { answer, resolve, nextCard, delivered, failed, tell, cardByToken, getView } = await import("./hub.ts");
+const { answer, resolve, nextCard, delivered, failed, tell, cardByToken, getView, stateOf } = await import("./hub.ts");
 const { AuthError, InputError, NotFound } = await import("../kernel/errors.ts");
 const { all, one, run } = await import("./storage.ts");
 
@@ -490,6 +491,17 @@ test("defaultChannels takes every card that names no channels of its own; a rule
   );
 });
 
+test("the state says when a channel's last card didn't get through, and stops saying so once one does", () => {
+  clean();
+  const chat = (now: number) => stateOf(now).channels.find((channel) => channel.id === "chat")!;
+  const id = tell("source:app:k", "应用", "周报来了", at(0)).card;
+  failed("chat", id, nextCard("chat", at(0))!.version, "session not ready", at(0));
+  assert.deepEqual(chat(at(0)).lastFailure, { card: id, tries: 1, error: "session not ready", givenUp: false });
+  assert.equal(stateOf(at(0)).channels.find((channel) => channel.id === "plain")!.lastFailure, undefined);
+  delivered("chat", id, nextCard("chat", at(1))!.version, "om_1", at(1));
+  assert.equal(chat(at(1)).lastFailure, undefined);
+});
+
 test("a failed send is retried further and further apart, then given up within the hour; a channel that never came hasn't failed", () => {
   clean();
   const id = tell("source:app:k", "应用", "周报来了", at(0)).card;
@@ -515,6 +527,13 @@ test("a failed send is retried further and further apart, then given up within t
   failed("chat", asking, 1, "旧的失败", at(1));
   assert.ok(nextCard("chat", at(1)), "a stale failure doesn't delay the update");
   assert.equal(v2.version, 2);
+  // What the channel reported is what the column keeps: a cut counted in code units leaves half a character behind for good.
+  clean();
+  const reported = "x".repeat(299) + "😀";
+  const { card: kept } = tell("source:app:k2", "应用", "周报来了", at(0));
+  const handed = nextCard("chat", at(0))!;
+  failed("chat", kept, handed.version, reported, at(0));
+  assert.equal(one<{ error: string }>("SELECT error FROM deliveries WHERE channel = 'chat'")!.error, reported);
 });
 
 test("a channel that takes a card and never reports stops getting it: after the last try, or once an hour is up", () => {

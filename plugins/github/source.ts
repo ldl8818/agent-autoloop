@@ -2,6 +2,7 @@
 // `pull_request.labeled`, `issue_comment.created` and so on, the object's number as the subject. In rules.json:
 //   "sources": { "github": { "name": "GitHub", "adapter": "github" } }, and AGENT_AUTOLOOP_SECRET_GITHUB in secrets.env.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { fit } from "../../worker/contract.ts";
 
 type Input = { headers: Record<string, string | string[] | undefined>; body: string; secret: string };
 
@@ -22,8 +23,8 @@ export default function github({ headers, body, secret }: Input) {
       id: String(headers["x-github-delivery"] ?? ""),
       type,
       subject: `${repo}${number}`.replace(/[^A-Za-z0-9#._:/@-]/g, "-").slice(0, 100),
-      summary: String(payload.comment?.body ?? object?.title ?? payload.head_commit?.message ?? "").slice(0, 200),
-      detail: String(payload.comment?.body ?? object?.body ?? "").slice(0, 4000),
+      summary: fit(String(payload.comment?.body ?? object?.title ?? payload.head_commit?.message ?? ""), 200),
+      detail: fit(String(payload.comment?.body ?? object?.body ?? ""), 4000),
       link: encodeURI(
         String(payload.comment?.html_url ?? object?.html_url ?? payload.repository?.html_url ?? ""),
       ).slice(0, 500),

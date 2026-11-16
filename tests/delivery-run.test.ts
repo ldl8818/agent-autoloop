@@ -374,6 +374,30 @@ test("a check restarted after syncing main is saved under the synchronized head 
   );
 });
 
+test("an execution error says its cause in the round's result", async (t) => {
+  startOver();
+  reviewFinds([]);
+  t.mock.method(Date, "now", () => Date.parse("2026-11-12T00:00:00Z"));
+  const checks = `repos/example/app/actions/workflows/check.yml/runs?head_sha=${code}&event=pull_request&per_page=100`;
+  const started = { head_sha: code, event: "pull_request", status: "in_progress", created_at: "2026-11-12T00:00:00Z" };
+  answers({
+    ...delivering({ ...openPr, head: { ...openPr.head, sha: docsOnly } }),
+    "repos/example/app/git/ref/heads/main": { object: { sha: code } },
+    [`repos/example/app/contents/ops/delivery.json?ref=${code}`]: settingsFile,
+    [`repos/example/app/compare/${code}...${docsOnly}`]: { status: "behind" },
+    [`repos/example/app/compare/${docsOnly}...${code}`]: { status: "ahead" },
+    "repos/example/app/pulls/8/update-branch": { routes: { "repos/example/app/pulls/8": openPr } },
+    [checks]: { workflow_runs: [{ ...started, id: 10 }] },
+    "repos/example/app/actions/runs/10/jobs?filter=latest&per_page=100": { fail: "审查超过 30 分钟没有完成，已停止" },
+  });
+  const message = readMessage(
+    await run("example/app", about(8), true, { notifyCommand: join(root, "must-not-notify") }),
+  );
+  assert.match(String(message.summary), /交付步骤暂时出错（.*审查超过 30 分钟没有完成，已停止.*），一分钟后接着查/);
+  const [retry] = (message.receipt as any).later;
+  assert.equal(JSON.parse(retry.about).execution, 1);
+});
+
 test("a check still stalled after a saved restart returns with its exact cause and notice, without an error retry", async (t) => {
   startOver();
   reviewFinds([]);

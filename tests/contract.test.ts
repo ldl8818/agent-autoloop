@@ -8,6 +8,8 @@
 // reported as retryable failure; a session carried on keeps to the copy of its skill it read
 // before, though the skill has changed since. A rule's session title isn't the first line, so every run of it looks the
 // same in a client that names a session after its first message; or it is filled from a subject the run doesn't share.
+// The prompt leaves out the receipt limits Agents trip on (a cancelled follow-up given a time, an event summary over 200
+// characters, a link that isn't a web address), so the whole receipt is sent back to be rewritten or dropped.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { promptFor, readMessage, repairPrompt, resultFrom } from "../worker/contract.ts";
@@ -65,6 +67,7 @@ test("the prompt says what to do and how to end, but not what anyone wrote", () 
   assert.match(text, /删数据、花钱/);
   assert.match(text, /没跑成：/);
   assert.match(text, /没事可做：/);
+  assert.match(text, /做成了什么[\s\S]*提交号、内部编号放括号里/);
   assert.match(text, /```agent-autoloop/);
   assert.ok(!text.includes("王某"));
   assert.ok(!text.includes("管理员权限"));
@@ -107,6 +110,8 @@ test("the prompt mentions what this run is carrying on, and what it may emit", (
   assert.match(text, /timers/);
   assert.match(text, /"events"/);
   assert.match(text, /feedback\.new/);
+  assert.match(text, /"summary":"一句话，200 字以内","link":"网址，没有就不写"/);
+  assert.match(text, /\{"key":"它的 key","cancel":true\}，不写 at 和 about/);
 });
 
 test("a session carried on reads its skill again, as it may have changed", () => {

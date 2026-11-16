@@ -23,7 +23,7 @@
 | 提问 | `cards.state`: `open → decided → done` 或 `open → closed` | `createCard` 创建；`answer` 核对本人、通道和消息 ref，只改 open，产生 `answer_event`；成功处理回答的 `applyReceipt` 才写 done；`resolve/closeCard` 表示无需决定 |
 | 通知 | 普通通知 open → closed；FYI 创建时就是 closed | `cardFromReceipt/notify/tell` 创建，本人或允许范围内的回执结案。decided 不等于执行过；续办被取消仍保留决定，不伪造 done |
 | 投递 | `deliveries[card_id:channel]` 的 `version/ref/tries/not_before/given_up` 组合：未发、已租出、重试等待、已同步、放弃 | `nextCard` 租给通道，`delivered` 确认，`failed` 排重试；卡片版本更高时更新原消息。超过窗口放弃，重复 tell 可重新启动已放弃投递 |
-| 复查 | `timers.event_id=null` 等待，非空已触发；同 `rule/lane/key` 只一个待触发 | `scheduleReview` 设置、改期、取消；`tick` 记唯一 timer.due 并派回原事项；删规则后到期只留记录、不派发 |
+| 复查 | `timers.event_id=null` 等待，非空已触发；同 `rule/lane/key` 只一个待触发 | `scheduleReview` 设置、改期、取消；`tick` 记唯一 timer.due 并派回原事项；已触发 timer 的资料留在投影直到关联 run 进入终态，供排队和重试续接使用，终态后从活动投影移除（事实日志保留完整变更）；删规则或改名后到期只留事件记录、不派发，并发通知卡片写明原规则名和复查开头 |
 | 定时计划 | `schedules.cron/next_at/skipped_at`，不是业务完成态 | `tick` 更新；错过只补最近一次，配置改变重新计时，暂停时跳过 |
 | 暂停 | `pauses[name]` 有效记录表示暂停，含 since/until；恢复删除，应答带回删掉的那条 | 本人 `pauseRule/resumeRule`、到期 `tick`。已经领取的不受影响，队列及回答复查留队，新来源事件跳过且恢复不自动补派；本人 `replayRule` 补跑 since 起跳过的事件，每条一次；暂停不能手动运行或补跑 |
 
@@ -68,6 +68,7 @@
 | --- | --- |
 | cbf158a / #111 | 停止后先交失败会重排；parallel 改动使回答/复查落错事项。失败停止归 cancelled，lane 保持 |
 | fdacb94 / #54 | 删规则后队列永久无人领取；现取消并通知 |
+| #286 | 实际部署里退役规则时名下还有复查，到期只记一条没人接的事件，本人不知道；现和排队的一轮一样通知 |
 | 4a0094f / #67 | 失败终止丢回执用量、会话及去重；现保留本次事实 |
 | c94a9c5 / #60 | 已续接中断改开新会话重做；现只在未接上时开新会话 |
 | 21594a5 / #211 | 实机事故明确记录：WebSocket 报错后回退 HTTPS 完成，仍被旧错误判失败；12 次成功重做，耗 111 万输入 Token。完成事件现清先前连接错误 |

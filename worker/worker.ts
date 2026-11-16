@@ -377,12 +377,21 @@ export function createWorker({
     endWith(entry, { ...result, notice: [...(result.notice ?? []), notice] });
   }
 
+  /**
+   * The session a run is in when its CLI hasn't said. The one made up after the old one couldn't be gone on in counts once
+   * that run has started: a CLI that never got going, or one that names its own sessions, has no such session, and handing
+   * it in would take the old one's place, so the retry would start over in a new one.
+   */
+  function madeUp(entry: Entry, adapter: Adapter, seen: Reading) {
+    return adapter.link && (!entry.triedFresh || seen.started) ? entry.session : undefined;
+  }
+
   /** A turn has ended. What it said is a result, or a reason to ask it again without redoing anything. */
   function conclude(entry: Entry, adapter: Adapter, code: number | null) {
     // One ended because its turn was over but it wouldn't exit said what it had to say first.
     const seen = read(entry, adapter, entry.finishedAt ? 0 : code);
     entry.usage = addUsage(addUsage(entry.usage, seen.usage), sessionRise(entry, seen));
-    const session = seen.session ?? (entry.turn > 0 && adapter.link ? entry.session : undefined);
+    const session = seen.session ?? (entry.turn > 0 ? madeUp(entry, adapter, seen) : undefined);
     if (seen.session) entry.session = seen.session;
     const usage = entry.usage && { usage: entry.usage };
     const known = session && { session };
@@ -510,7 +519,7 @@ export function createWorker({
       entry.session = seen.session;
       save(entry);
     }
-    const session = seen.session ?? (adapter.link ? entry.session : undefined);
+    const session = seen.session ?? madeUp(entry, adapter, seen);
     if (session && session !== entry.told) {
       try {
         await hub.started(entry.run, entry.token, { session, ...(adapter.link && { link: adapter.link(session) }) });
