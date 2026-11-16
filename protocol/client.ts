@@ -61,10 +61,6 @@ export function hubClient(url: string, key: string) {
     pause: (rule: string, body: { reason?: string; until?: string } = {}) =>
       call("POST", `/v1/rules/${encodeURIComponent(rule)}/pause`, { body }),
     resume: (rule: string) => call("POST", `/v1/rules/${encodeURIComponent(rule)}/resume`, { body: {} }),
-    complete: (rule: string, body: { subject?: string; reason: string }) =>
-      call("POST", `/v1/rules/${encodeURIComponent(rule)}/complete`, { body }),
-    reopen: (rule: string, body: { subject?: string; reason: string }) =>
-      call("POST", `/v1/rules/${encodeURIComponent(rule)}/reopen`, { body }),
     run: (rule: string, body: { subject?: string; reason?: string } = {}) =>
       call("POST", `/v1/rules/${encodeURIComponent(rule)}/run`, { body }),
     replay: (rule: string, body: { since: string }) =>

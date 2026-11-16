@@ -219,16 +219,12 @@ const CONTROL_FIELDS: Record<string, string[]> = {
   resume: [],
   run: ["subject", "reason"],
   replay: ["since"],
-  complete: ["subject", "reason"],
-  reopen: ["subject", "reason"],
 };
 const CONTROL_INPUTS: Record<string, string> = {
   pause: "pauseRule",
   resume: "resumeRule",
   run: "runRule",
   replay: "replayRule",
-  complete: "completeTask",
-  reopen: "reopenTask",
 };
 
 /** Pause, resume, run a rule now, or replay what its pause skipped: the owner's, kept in the log. */
@@ -332,7 +328,7 @@ async function route(call: Call): Promise<Response> {
   if (method === "GET" && path === "/v1/cards/next") return nextCard(call);
   const card = /^\/v1\/cards\/([1-9][0-9]*)\/(delivered|failed|answer|resolve|correct)$/.exec(path);
   if (method === "POST" && card) return cardAction(call, Number(card[1]), card[2]);
-  const ruleControl = /^\/v1\/rules\/([^/]+)\/(pause|resume|run|replay|complete|reopen)$/.exec(path);
+  const ruleControl = /^\/v1\/rules\/([^/]+)\/(pause|resume|run|replay)$/.exec(path);
   if (method === "POST" && ruleControl) return control(call, ruleControl[1], ruleControl[2]);
   if (method === "GET" && path === "/v1/state") return state(call);
   if (method === "GET" && path === "/v1/stream") return stream(call);

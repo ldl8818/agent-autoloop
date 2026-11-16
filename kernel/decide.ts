@@ -117,10 +117,6 @@ function assignQueued(draft: Draft, run: Row) {
   put(draft, "runs", run.id, { agent: rule.to, rules_version: config.version, ...session });
 }
 const threadOf = (run: Row) => ({ rule: run.rule, lane: run.lane, grp: run.grp });
-const completionOf = (draft: Draft, rule: string, lane: string) => {
-  const row = draft.view.get("completed", JSON.stringify([rule, lane]));
-  return row?.state === "done" ? row : undefined;
-};
 
 /** The session a round about to start goes on in. With resume, one that has none takes its thread's last, unless that round was
  * stopped: what stopped it, or the owner's reason, would meet this one too. Rounds on a thread can share a session, so another
@@ -186,7 +182,6 @@ const notify = (draft: Draft, key: string, title: string, text: string, extra: R
 
 /** A queued run of this rule and thread takes the event, so what comes in while it waits is handled together. */
 function enqueue(draft: Draft, rule: Rule, event: number, lane: string, resume?: string | null) {
-  if (completionOf(draft, rule.name, lane)) return null;
   const rulesVersion = draft.view.get("config", "rules")!.version;
   const stamps = { not_before: draft.at, created_at: draft.at, rules_version: rulesVersion };
   const run =
@@ -241,9 +236,7 @@ function ingest(draft: Draft, source: string, given: unknown, sent = false) {
   // A paused rule doesn't take the event, and nothing is kept back for it: the event is recorded as skipped for it.
   const isPaused = (rule: Rule) => !!pauseOf(draft.view, rule, draft.now);
   const paused = matched.filter(isPaused).map((rule) => rule.name);
-  const taking = matched.filter(
-    (rule) => !isPaused(rule) && !completionOf(draft, rule.name, rule.parallel ? event.subject : ""),
-  );
+  const taking = matched.filter((rule) => !isPaused(rule));
   const id = recordEvent(
     draft,
     source,
@@ -252,10 +245,6 @@ function ingest(draft: Draft, source: string, given: unknown, sent = false) {
     paused,
     sent,
   );
-  const completed = matched
-    .filter((rule) => completionOf(draft, rule.name, rule.parallel ? event.subject : ""))
-    .map((rule) => rule.name);
-  if (completed.length) put(draft, "events", id, { completed: JSON.stringify(completed) });
   if (tooDeep) {
     const words = `同一条处理链已超过 ${MAX_HOPS} 层，后续事件已记录，没有继续派发。`;
     notify(draft, `hops:${source}:${event.id}`, "事件循环已停止", words, { once: true });
@@ -324,7 +313,6 @@ function claimNext(draft: Draft, worker: string, claim: string) {
     const rule = ruleNamed(draft, run.rule);
     // What was queued before a pause, or an answer that came in during one, waits for the resume.
     if (!rule || !agents.includes(rule.to) || pauseOf(draft.view, rule, draft.now)) return false;
-    if (completionOf(draft, run.rule, run.lane)) return false;
     const agentLimit = draft.rules.agents[rule.to].maxActive;
     return (
       Date.parse(run.not_before) <= draft.now &&
@@ -336,7 +324,6 @@ function claimNext(draft: Draft, worker: string, claim: string) {
   };
   // The same claim again means the answer got lost: it gets back the run it already has.
   const held = claimed.find((run) => run.claim === claim && workerOf(draft.view, run) === worker);
-  if (held && (held.task_completed_at || completionOf(draft, held.rule, held.lane))) return null;
   const run = held ?? runs.find(claimable);
   if (!run) return null;
   if (!held) {
@@ -460,13 +447,6 @@ function scheduleReview(draft: Draft, run: Row, later: Later) {
 }
 
 /** A receipt takes effect here, all of it in the one fact. */
-function settleAnswers(draft: Draft, run: Row, summary: string) {
-  const eventIds = eventsOf(draft.view, run.id).map((event) => event.id);
-  for (const card of rows(draft.view, "cards", { answer_event: eventIds, state: "decided" })) {
-    put(draft, "cards", card.id, { state: "done", result: summary, closed_at: draft.at, version: card.version + 1 });
-  }
-}
-
 function applyReceipt(draft: Draft, run: Row, result: Result) {
   const { id } = run;
   const rule = ruleNamed(draft, run.rule);
@@ -475,7 +455,10 @@ function applyReceipt(draft: Draft, run: Row, result: Result) {
   put(draft, "runs", id, { state: result.outcome, finished_at: draft.at, summary, error: null, cancel_at: null });
   closeOpen(draft, (key) => key === `run:${id}:failing`, "后来跑成了");
   closeOpen(draft, (key) => key === `run:${id}:unknown`, "结果回来了");
-  settleAnswers(draft, run, summary);
+  const eventIds = eventsOf(draft.view, id).map((event) => event.id);
+  for (const card of rows(draft.view, "cards", { answer_event: eventIds, state: "decided" })) {
+    put(draft, "cards", card.id, { state: "done", result: summary, closed_at: draft.at, version: card.version + 1 });
+  }
   for (const item of result.resolve ?? []) {
     const card = openInScope(draft.view, run).find((card) => card.id === item.card);
     if (card) closeCard(draft, card, item.reason.trim(), `第 ${id} 轮`);
@@ -510,12 +493,7 @@ function finish(draft: Draft, id: number, token: string, given: unknown) {
     if (prior.last_result !== hash) throw new Conflict("这一次执行已经交过不一样的结果");
     return { rejected: JSON.parse(prior.last_answer ?? "[]"), duplicate: true };
   }
-  const run = heldRun(
-    draft,
-    id,
-    token,
-    prior?.task_completed_at ? ["claimed", "unknown", "cancelled"] : ["claimed", "unknown"],
-  );
+  const run = heldRun(draft, id, token, ["claimed", "unknown"]);
   const result = parseResult(given);
   const session = result.session ?? run.session;
   const usage = result.usage
@@ -523,20 +501,6 @@ function finish(draft: Draft, id: number, token: string, given: unknown) {
     : run.usage;
   put(draft, "runs", id, { last_issued: run.issued, last_result: hash, issued: null, session, usage });
   let rejected: Rejected[] = [];
-  // Completion may race a worker's last result, even across a later explicit reopening.
-  if (run.task_completed_at || completionOf(draft, run.rule, run.lane)) {
-    put(draft, "runs", id, {
-      state: result.outcome === "failed" ? "cancelled" : result.outcome,
-      summary: result.summary ?? "",
-      finished_at: draft.at,
-      cancel_at: null,
-      last_answer: "[]",
-    });
-    clearFiredTimers(draft, run);
-    closeStopped(draft, id, "事项已完成");
-    if (result.outcome === "done" || result.outcome === "nothing") settleAnswers(draft, run, result.summary ?? "");
-    return { rejected: [] };
-  }
   // Told to stop, one that failed first has stopped all the same: trying again would start what the owner ended.
   if (result.outcome === "cancelled" || (result.outcome === "failed" && run.cancel_at)) {
     put(draft, "runs", id, {
@@ -577,7 +541,6 @@ function answer(draft: Draft, id: number, given: Row) {
     closeCard(draft, card, "已处理", given.by ?? null, text);
     return { changed: true, state: "closed" };
   }
-  if (card.rule && completionOf(draft, card.rule, card.lane)) throw new Conflict("事项已完成，旧提问不能重新启动任务");
   const optionCount = JSON.parse(card.options).length;
   const inRange = Number.isInteger(given.choice) && given.choice >= 0 && given.choice < optionCount;
   if (given.choice === undefined ? !text : !inRange) throw new InputError("没有这个选项");
@@ -660,10 +623,6 @@ function tick(draft: Draft) {
   }
   const due = rows(draft.view, "timers", { event_id: null }).filter((timer) => Date.parse(timer.at) <= now);
   for (const timer of due.sort((a, b) => a.at.localeCompare(b.at))) {
-    if (completionOf(draft, timer.rule, timer.lane)) {
-      set(draft, "timers", timer.id, null);
-      continue;
-    }
     const rule = ruleNamed(draft, timer.rule);
     const event = { id: `timer:${timer.id}`, type: "timer.due", subject: timer.lane, hops: timer.hops ?? 0 };
     const eventId = recordEvent(draft, timer.source, event, rule ? [rule.name] : []);
@@ -712,53 +671,8 @@ function pauseFields(draft: Draft, given: Row) {
 
 const pauseView = ({ by, reason, since, until }: Row) => ({ by, reason, since, until });
 
-function taskScope(draft: Draft, name: string, given: Row) {
-  const rule = knownRule(draft, name);
-  if (!eventRule(rule)) throw new InputError("定时业务规则不能标记为已完成；维护停用请用 pause");
-  const { subject = "", reason } = given;
-  if (typeof subject !== "string" || (rule.parallel ? !subject.trim() : subject !== ""))
-    throw new InputError("parallel 事项必须给出确切 subject，非 parallel 规则不接受 subject");
-  parseEvent({ id: "scope", type: "task.control", subject });
-  if (typeof reason !== "string" || !reason.trim() || [...reason].length > PAUSE_REASON)
-    throw new InputError("要填写核实完成或重新打开的原因，最多500字");
-  return { rule: name, lane: subject, reason: reason.trim() };
-}
-
 /** Owner actions on one rule. They are facts in the log, not edits to rules.json. */
 const CONTROL = {
-  completeTask(draft: Draft, name: string, by: string, given: Row) {
-    const scope = taskScope(draft, name, given);
-    const key = JSON.stringify([name, scope.lane]);
-    const existing = completionOf(draft, name, scope.lane);
-    if (existing) return { changed: false, completed: existing };
-    if (rows(draft.view, "cards", { rule: name, lane: scope.lane, state: "open" }).some((card) => card.kind === "ask"))
-      throw new Conflict("事项仍有未解决的提问，不能登记为已完成");
-    const completed = put(draft, "completed", key, { ...scope, state: "done", by, at: draft.at });
-    for (const timer of rows(draft.view, "timers", { rule: name, lane: scope.lane }))
-      set(draft, "timers", timer.id, null);
-    for (const run of rows(draft.view, "runs", {
-      rule: name,
-      lane: scope.lane,
-      state: ["queued", "claimed", "unknown"],
-    })) {
-      put(draft, "runs", run.id, {
-        task_completed_at: draft.at,
-        state: "cancelled",
-        finished_at: draft.at,
-        ...(run.state === "queued" && { error: null, summary: "事项已完成，不再派发" }),
-      });
-      closeStopped(draft, run.id, "事项已完成");
-    }
-    return { changed: true, completed };
-  },
-  reopenTask(draft: Draft, name: string, by: string, given: Row) {
-    const scope = taskScope(draft, name, given);
-    const key = JSON.stringify([name, scope.lane]);
-    if (!completionOf(draft, name, scope.lane)) return { changed: false };
-    put(draft, "completed", key, { ...scope, state: "open", by, at: draft.at });
-    // The reopening decision is itself auditable; no old event or timer is replayed.
-    return { changed: true, rule: name, subject: scope.lane, by, reason: scope.reason };
-  },
   pauseRule(draft: Draft, name: string, by: string, given: Row) {
     knownRule(draft, name);
     const fields = pauseFields(draft, given);
@@ -796,9 +710,7 @@ const CONTROL = {
     for (const id of [...events].sort((a, b) => a - b)) {
       const event = draft.view.get("events", id);
       if (!event || !JSON.parse(event.paused ?? "[]").includes(name) || taken(id)) continue;
-      const run = enqueue(draft, rule, id, rule.parallel ? event.subject : "");
-      if (run === null) continue;
-      runs.add(run);
+      runs.add(enqueue(draft, rule, id, rule.parallel ? event.subject : ""));
       replayed.push(id);
     }
     return { events: replayed, runs: [...runs] };
@@ -807,8 +719,6 @@ const CONTROL = {
   runRule(draft: Draft, name: string, by: string, given: Row) {
     const rule = knownRule(draft, name);
     const { subject = "", reason = "" } = given ?? {};
-    if (completionOf(draft, name, rule.parallel ? subject : ""))
-      throw new Conflict("事项已完成；只有明确重新打开后才能运行");
     if (typeof reason !== "string" || [...reason].length > PAUSE_REASON) {
       throw new InputError(`说明要是 ${PAUSE_REASON} 字以内的文字`);
     }
@@ -823,7 +733,7 @@ const CONTROL = {
       detail: reason,
     });
     const eventId = recordEvent(draft, source, event, [name]);
-    const run = enqueue(draft, rule, eventId, rule.parallel ? subject : "")!;
+    const run = enqueue(draft, rule, eventId, rule.parallel ? subject : "");
     // Waiting out a retry's backoff wouldn't be now: the owner asking is the go-ahead.
     put(draft, "runs", run, { manual: 1, not_before: draft.at });
     return { event: eventId, run };

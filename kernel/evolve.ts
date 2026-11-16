@@ -14,7 +14,7 @@ export const TABLES = [
   "config",
   "due",
   "pauses",
-  "completed",
+  "completed", // Read compatibility for facts written by the retired task-completion extension.
 ] as const;
 export type Table = (typeof TABLES)[number];
 export type Change = { table: Table; key: string; row: Row | null };

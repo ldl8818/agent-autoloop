@@ -35,8 +35,6 @@
 
 `due` 是 `kernel/due.ts` 算的时钟索引，和业务事实同事务提交；不是另一份业务状态。`kernel/store.ts` 独占追加事实，`kernel/evolve.ts` 独占持久投影写入。
 
-事项交付终态由 `completed` 投影维护，以规则名和 lane 的二元组为键。本人 `completeTask` 核实登记后，`enqueue/claimNext/tick/finish` 拦截该事项后续派发、复查和迟到重试；`reopenTask` 只允许新的工作，不重放旧事件。轮次 `done` 不触发事项完成。接口与兼容边界见[事项完成与重新打开](protocol.md#事项完成与重新打开)。
-
 ## worker 本地执行
 
 状态存在 `worker/runs/<run>-<attempt>/entry.json`、stdout 和 exit 文件，由 `worker/worker.ts` 改：`start` 先保存已领任务；`launch` 保存 turn 后启动带标记进程组；`check` 结合 pid、真实进程命令、退出标记区分运行、不可核实、退出；`stop` 保存 stopping/why，进程组确实结束后 `conclude` 得结果；回执重写由 repairs/turn/resume 表达，最多两次；`endWith` 先持久化 result，`settle` 才提交；接受或明确 4xx 拒收移除 entry，5xx/连接失败继续保留；`tidy` 只清没有 entry 的过期目录。

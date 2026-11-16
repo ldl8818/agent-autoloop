@@ -112,8 +112,6 @@ External events work the same way once the source is connected. To hand new GitH
 
 `agent-autoloop pause <rule>` and `resume <rule>` pause and resume one rule: while paused it skips its scheduled times and doesn't take or queue events, and a resume doesn't catch up on its own. A resume lists the events the pause skipped and prints `agent-autoloop replay <rule> --since <time>`, which hands them all to the rule at once, each only once. `agent-autoloop run <rule>` runs it once now. These are kept in the hub's log; `rules.json` is not changed. `agent-autoloop runs [rule]` lists finished rounds, `--before <round>` pages back, and `agent-autoloop why <round>` tells the full story of one.
 
-For a one-off delivery, the trusted controller confirms completion with `agent-autoloop complete <rule> --reason evidence` (also `--subject object` for a parallel rule). The hub retires timers and queued rounds and blocks further dispatch for that matter. A successful recurring business round does not close its matter. Only an explicit `reopen` admits new work; ordinary `resume` does not. See [task completion](docs/protocol.md#事项完成与重新打开).
-
 Changes take effect within seconds of saving. Run `agent-autoloop check` to validate, `agent-autoloop check <file>` to validate a draft without touching the running hub, `agent-autoloop rules explain [file]` to see the rules in effect and their next runs (a draft file too), and `agent-autoloop emit <type> --dry-run` to preview who an event would go to (it doesn't contact the hub or write to the log). If you make a mistake, or the file is deleted or can't be read, the hub keeps running the previous valid rules and sends you a card about it.
 
 ### Daily runtime brief
