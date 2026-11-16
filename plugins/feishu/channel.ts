@@ -36,6 +36,43 @@ function projectName(card: Card, projects: Record<string, string>) {
   return match?.[1].trim() || card.rule || "中台";
 }
 
+/** Translate display labels only; retain the original rule for routing and old card callbacks. */
+function sourceName(card: Card) {
+  const rule = card.rule;
+  if (!rule?.startsWith("caipiao-")) return rule;
+  if (/^caipiao-[\p{Script=Han}]{2,12}$/u.test(rule)) return rule;
+  // Diagnosis and repair rules span functions; their first title line can identify the specific work.
+  if (/^caipiao-(diagnose|development|maintenance)(?:-|$)/u.test(rule)) {
+    const title = card.title.split("\n")[0];
+    const functionNames: [RegExp, string][] = [
+      [/补抓|补采/u, "资料补抓"],
+      [/报告|发布/u, "报告发布"],
+      [/开奖/u, "开奖更新"],
+      [/论坛/u, "论坛采集"],
+      [/采集|抓取/u, "网站采集"],
+    ];
+    const functionName = functionNames.find(([pattern]) => pattern.test(title))?.[1];
+    if (functionName) return `caipiao-${functionName}`;
+  }
+  const names: Record<string, string> = {
+    "tracking-evening": "开奖更新",
+    "tracking-noon": "网站采集",
+    "tracking-retry": "资料补抓",
+    catchup: "断网补办",
+    recovery: "更新补办",
+    selfheal: "故障恢复",
+    "forum-fetch": "论坛采集",
+    "forum-catchup": "论坛补抓",
+    "forum-settle": "论坛复盘",
+    diagnose: "故障诊断",
+    development: "功能修复",
+    maintenance: "故障恢复",
+    "decision-acceptance": "结果验收",
+  };
+  const name = Object.keys(names).find((key) => rule === `caipiao-${key}` || rule.startsWith(`caipiao-${key}-`));
+  return `caipiao-${name ? names[name] : "运行维护"}`;
+}
+
 function headingOf(card: Card, projects: Record<string, string>) {
   const title = Array.from(card.title.replace(/^主人[，,：:]\s*/u, "").split("\n")[0])
     .slice(0, 36)
@@ -142,7 +179,7 @@ function renderUpstream(card: Card) {
       title: { tag: "plain_text", content: card.title },
       // Which rule or task it came from, in every state: cards from many places reach one person.
       ...(card.rule && card.rule !== card.title
-        ? { subtitle: { tag: "plain_text", content: `来源：${card.rule}` } }
+        ? { subtitle: { tag: "plain_text", content: `来源：${sourceName(card)}` } }
         : {}),
       template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
     },
@@ -248,7 +285,7 @@ export function render(
       title: { tag: "plain_text", content: heading },
       // Which rule or task it came from, in every state: cards from many places reach one person.
       ...(card.rule && card.rule !== card.title
-        ? { subtitle: { tag: "plain_text", content: `来源：${card.rule}` } }
+        ? { subtitle: { tag: "plain_text", content: `来源：${sourceName(card)}` } }
         : {}),
       template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
     },
