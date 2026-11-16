@@ -67,7 +67,7 @@ const stubbed = (adapter: Adapter, t: object) => {
 test("a built-in agent starts the program its rules name, with its own arguments after it", () => {
   for (const adapter of [claude, codex, dsh, zcode]) {
     const argv = adapter.command({ ...turn, program: "/opt/bin/via-gateway" });
-    assert.equal(argv[0], "/opt/bin/via-gateway");
+    assert.equal(adapter === codex ? JSON.parse(argv.at(-1)!).program : argv[0], "/opt/bin/via-gateway");
     assert.ok(argv.includes("做这件事") || argv.some((part) => part.includes("做这件事")), "the prompt still goes in");
   }
 });
@@ -266,31 +266,27 @@ test("Claude Code: a receipt it wrote isn't lost when a background task calls it
 });
 
 test("Codex: access, new and going on", { skip: !stubbed(codex, {}) }, () => {
-  const argv = stubbed(codex, {})!;
-  assert.deepEqual(argv.slice(1, 4), ["exec", "--json", "--skip-git-repo-check"]);
-  assert.ok(argv.at(-1)!.endsWith("做这件事"));
-  assert.ok(argv.includes('sandbox_mode="workspace-write"'));
-  assert.ok(argv.includes('approval_policy="never"'));
-  assert.ok(stubbed(codex, { access: "read" })!.includes('sandbox_mode="read-only"'));
-  assert.ok(stubbed(codex, { access: "full" })!.includes('sandbox_mode="danger-full-access"'));
-  const wrapped = stubbed(codex, { resume: "thread-1", model: "m", effort: "xhigh", tier: "priority" })!;
-  assert.ok(wrapped.some((part) => part.endsWith("resume.ts")));
-  const again = JSON.parse(wrapped.at(-1)!).argv as string[];
-  assert.deepEqual(again.slice(1, 3), ["exec", "resume"]);
-  assert.equal(again.at(-2), "thread-1");
-  assert.equal(again.at(-1), argv.at(-1));
-  assert.ok(has(again, "-m", "m"));
-  assert.ok(again.includes('model_reasoning_effort="xhigh"'));
-  assert.ok(again.includes('service_tier="priority"'));
-  assert.ok(stubbed(codex, { tier: "priority" })!.includes('service_tier="priority"'), "a new run gets it too");
-  assert.ok(!argv.some((part) => part.startsWith("service_tier")), "left to Codex's own config unless the rules say");
+  const decode = (overrides = {}) => JSON.parse(stubbed(codex, overrides)!.at(-1)!);
+  const first = decode();
+  assert.equal(first.turn.access, "edit");
+  assert.equal(first.turn.resume, null);
+  assert.ok(first.turn.prompt.endsWith("做这件事"));
+  assert.equal(decode({ access: "read" }).turn.access, "read");
+  assert.equal(decode({ access: "full" }).turn.access, "full");
+  const again = decode({ resume: "thread-1", model: "m", effort: "xhigh", tier: "priority" });
+  assert.equal(again.turn.resume, "thread-1");
+  assert.equal(again.turn.model, "m");
+  assert.equal(again.turn.effort, "xhigh");
+  assert.equal(again.turn.tier, "priority");
+  assert.equal(first.turn.tier, undefined);
+  assert.ok(stubbed(codex, {})!.some((part) => part.endsWith("resume.ts")));
 });
 
 test("Codex: new and resumed runs use only browser access configured for the background task", () => {
   for (const resume of [null, "thread-1"]) {
     const command = codex.command({ ...turn, resume });
-    const prompt = resume ? JSON.parse(command.at(-1)!).argv.at(-1) : command.at(-1)!;
-    assert.match(prompt, /后台 codex exec/);
+    const prompt = JSON.parse(command.at(-1)!).turn.prompt;
+    assert.match(prompt, /桌面共用的 Codex App Server/);
     assert.match(prompt, /本轮实际可用的浏览器工具/);
     assert.match(prompt, /规则或 Skill.*浏览器入口/);
     assert.match(prompt, /桌面应用.*浏览器连接/);
@@ -339,6 +335,10 @@ test("Codex: only a finished turn's last message is its answer", () => {
   });
   assert.equal(codex.read("", 1, "cannot resume: active writer").error, "cannot resume: active writer");
   assert.equal(codex.link!("t"), "codex://threads/t");
+  assert.equal(
+    codex.read(lines(started, said("主人，没跑成：连接暂时不可用"), ended), 0, "").text,
+    "没跑成：连接暂时不可用",
+  );
 });
 
 test("Codex: a turn that got going says so, however it ended; one that never did doesn't", () => {

@@ -22,7 +22,7 @@ test("a custom business program can be launched without Codex discoverable for m
     IN_THE_APP.length = 0;
     const command = codex.command({ prompt: 'work', title: '项目｜目标', session: 'owned', resume: null,
       cwd: ${JSON.stringify(home)}, access: 'read', contextFile: '', folder: '', program: process.execPath });
-    if (!command[2].endsWith('title.ts')) throw Error('business command was not constructed');
+    if (JSON.parse(command.at(-1)).program !== process.execPath) throw Error('business command was not constructed');
   `,
     ],
     { encoding: "utf8", env: { ...process.env, PATH: "", SHELL: "/missing-shell" } },
@@ -43,16 +43,11 @@ test("naming wraps both launch paths while cancellation retains the original sto
   };
   for (const resume of [null, "owned"]) {
     const command = codex.command({ ...base, resume });
-    assert.ok(command[2].endsWith("title.ts"));
+    assert.ok(command[2].endsWith("resume.ts"));
     const metadata = JSON.parse(command[3]);
-    assert.equal(metadata.title, base.title);
-    if (resume) {
-      assert.ok(metadata.argv[2].endsWith("resume.ts"));
-      assert.equal(JSON.parse(metadata.argv[3]).turn.resume, resume);
-    } else {
-      assert.equal(metadata.argv[0], process.execPath);
-      assert.equal(metadata.argv[1], "exec");
-    }
+    assert.equal(metadata.turn.title, base.title);
+    assert.equal(metadata.turn.resume, resume);
+    assert.equal(metadata.program, process.execPath);
   }
   const cancel = codex.cancel!({ ...base, resume: "owned" });
   assert.ok(cancel[2].endsWith("resume.ts"));

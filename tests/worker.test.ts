@@ -253,6 +253,23 @@ test("a job runs in its rule's folder with the prompt and context file, and with
   assert.equal(w.entries().length, 0, "handed in and let go");
 });
 
+test("a trusted lifecycle wraps the complete adapter command and preserves its outcome", async () => {
+  const wrapper = join(home, "lifecycle.sh");
+  const proof = join(folder, "lifecycle-proof");
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\nprintf 'prepared\\n' > '${proof}'\n"$@"\nstatus=$?\nprintf 'finalized\\n' >> '${proof}'\nexit "$status"\n`,
+    { mode: 0o755 },
+  );
+  const hub = fakeHub();
+  const given = job({ command: ["/bin/sh", "-c", "echo 生命周期完成"] });
+  hub.jobs.push({ ...given, agent: { ...given.agent, wrapper } });
+  const w = worker(hub);
+  await until(w, () => hub.results.length === 1);
+  assert.equal(hub.results[0].summary, "生命周期完成");
+  assert.equal(readFileSync(proof, "utf8"), "prepared\nfinalized\n");
+});
+
 test("a bad exit code, or no last message, is a failure saying why", async () => {
   const hub = fakeHub();
   const bad = job({ command: ["/bin/sh", "-c", "echo boom >&2; exit 3"] });

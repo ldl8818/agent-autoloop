@@ -3,8 +3,8 @@
 // Windows needs the same npm-style executable shim as an installed CLI; it cannot spawn a shebang script directly.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { basename, join } from "node:path";
 import type { Duplex } from "node:stream";
@@ -104,7 +104,7 @@ async function fixture(mode = "locked") {
         calls.push(message);
         const reply = (result: object) => send({ id: message.id, result });
         if (message.method === "initialize") reply({ userAgent: "test" });
-        if (message.method === "thread/resume")
+        if (message.method === "thread/resume" || message.method === "thread/start")
           reply({
             thread: {
               id: "original",
@@ -112,6 +112,8 @@ async function fixture(mode = "locked") {
             },
           });
         if (message.method === "thread/turns/list") {
+          if (mode === "recovered-new-input" && savedTurn?.status === "completed")
+            send({ method: "turn/completed", params: { threadId: "original", turn: savedTurn } });
           reply({ data: savedTurn ? [savedTurn] : [] });
           if (mode === "drop-message" && savedTurn?.status === "inProgress")
             setTimeout(() => {
@@ -124,7 +126,7 @@ async function fixture(mode = "locked") {
         }
         if (message.method === "turn/start") {
           savedTurn = {
-            id: "own",
+            id: calls.filter((x) => x.method === "turn/start").length === 1 ? "own" : "own-2",
             status: "inProgress",
             items: [
               { type: "userMessage", clientId: message.params.clientUserMessageId, content: message.params.input },
@@ -136,6 +138,7 @@ async function fixture(mode = "locked") {
           }
           if (mode === "drop-message") savedTurn.items.push({ type: "agentMessage", text: "recovered final message" });
           finish = () => {
+            savedTurn.status = "completed";
             send({
               method: "item/completed",
               params: { threadId: "other", turnId: "own", item: { type: "agentMessage", text: "wrong thread" } },
@@ -148,35 +151,42 @@ async function fixture(mode = "locked") {
               method: "item/completed",
               params: {
                 threadId: "original",
-                turnId: "own",
-                item: { type: "agentMessage", text: "remembered context: iris-728; blue" },
+                turnId: savedTurn.id,
+                item: {
+                  type: "agentMessage",
+                  text: mode === "business-failed" ? "没跑成：临时服务不可用" : "remembered context: iris-728; blue",
+                },
               },
             });
             send({
               method: "thread/tokenUsage/updated",
               params: {
                 threadId: "original",
-                turnId: "own",
+                turnId: savedTurn.id,
                 tokenUsage: { total: { inputTokens: 120, cachedInputTokens: 80, outputTokens: 9 } },
               },
             });
             send({
               method: "turn/completed",
-              params: { threadId: "original", turn: { id: "own", status: "completed" } },
+              params: { threadId: "original", turn: { id: savedTurn.id, status: "completed" } },
             });
           };
           // Notifications can arrive before the turn/start response.
           send({ method: "turn/started", params: { threadId: "original", turn: { id: "own" } } });
-          reply({ turn: { id: "own" } });
+          reply({ turn: { id: savedTurn.id } });
           if (mode.startsWith("drop-")) socket.destroy();
-          else if (mode !== "cancel") finish();
+          else if (
+            mode !== "cancel" &&
+            (!["new-correction", "recovered-new-input"].includes(mode) || savedTurn.id === "own")
+          )
+            finish();
         }
         if (message.method === "turn/interrupt") {
           savedTurn.status = "interrupted";
           reply({});
           send({
             method: "turn/completed",
-            params: { threadId: "original", turn: { id: "own", status: "interrupted" } },
+            params: { threadId: "original", turn: { id: savedTurn.id, status: "interrupted" } },
           });
         }
         if (message.method === "thread/unsubscribe") {
@@ -211,22 +221,29 @@ if (process.argv[2] === "app-server") {
   );
   const argv = codex.command({
     prompt: "finish blue",
-    resume: "original",
+    resume: mode.startsWith("new-") ? null : "original",
     session: "original",
     cwd: home,
-    access: "read",
+    access: mode === "new-full" ? "full" : "read",
     model: "configured-model",
     effort: "low",
     tier: "priority",
     contextFile: join(home, "context.json"),
     folder: home,
     program: executable(program),
-    requestId: mode,
+    requestId: mode === "legacy-inputs" ? "90017:0" : mode + randomUUID(),
+    inputIds: ['["local","original-event"]'],
   });
   const [command, args] = commandLine(argv);
   const children: ReturnType<typeof spawn>[] = [];
-  const launch = () => {
-    const child = spawn(command, args, { cwd: home });
+  const launch = (overrides?: number | object) => {
+    const nextArgs = [...args];
+    if (overrides) {
+      const request = JSON.parse(nextArgs.at(-1)!);
+      Object.assign(request.turn, typeof overrides === "number" ? { attempt: overrides } : overrides);
+      nextArgs[nextArgs.length - 1] = JSON.stringify(request);
+    }
+    const child = spawn(command, nextArgs, { cwd: home });
     children.push(child);
     let stdout = "",
       stderr = "";
@@ -240,6 +257,14 @@ if (process.argv[2] === "app-server") {
   const { child, done } = launch();
   return {
     calls,
+    receiptFile: join(
+      home,
+      "worker",
+      "codex",
+      createHash("sha256")
+        .update(JSON.stringify(JSON.parse(args.at(-1)!).turn.requestId))
+        .digest("hex") + ".json",
+    ),
     release: () => release(),
     child,
     done,
@@ -365,20 +390,138 @@ test(
   },
 );
 
-test("Codex normal resumes and failed turns that already started never enter the shared retry", async () => {
-  for (const mode of ["normal", "started-error"]) {
-    const f = await fixture(mode);
-    try {
-      const r = await f.done;
-      const reading = codex.read(r.out, r.code, r.err);
-      assert.equal(reading.started, true);
-      assert.equal(reading.session, "original");
-      assert.equal(f.calls.length, 0);
-      if (mode === "normal") assert.equal(reading.text, "normal resume");
-      else assert.ok(reading.error);
-    } finally {
-      await f.close();
+test("Codex creates new tasks on the shared server with full access and replays a completed launch once", async () => {
+  const f = await fixture("new-full");
+  try {
+    const r = await f.done;
+    const reading = codex.read(r.out, r.code, r.err);
+    assert.equal(reading.error, undefined);
+    assert.equal(reading.session, "original");
+    assert.equal(reading.text, "remembered context: iris-728; blue");
+    const start = f.calls.find((x) => x.method === "thread/start");
+    assert.equal(start.params.sandbox, "danger-full-access");
+    assert.equal(start.params.approvalPolicy, "never");
+    const submit = f.calls.find((x) => x.method === "turn/start");
+    assert.deepEqual(submit.params.sandboxPolicy, { type: "dangerFullAccess" });
+    assert.equal(submit.params.approvalPolicy, "never");
+    const replay = await f.again().done;
+    assert.equal(codex.read(replay.out, replay.code, replay.err).text, reading.text);
+    assert.equal(f.calls.filter((x) => x.method === "thread/start").length, 1);
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a confirmed business failure retries in its original thread while the same attempt only replays", async () => {
+  const f = await fixture("business-failed");
+  try {
+    const first = await f.done;
+    assert.equal(codex.read(first.out, first.code, first.err).text, "没跑成：临时服务不可用");
+    await f.again().done;
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+    const next = { attempt: 2, inputIds: ['["local","original-event"]', '["answer","new-answer"]'] };
+    const second = await f.again(next).done;
+    assert.equal(codex.read(second.out, second.code, second.err).session, "original");
+    const submitted = f.calls.filter((x) => x.method === "turn/start");
+    assert.equal(submitted.length, 2);
+    assert.notEqual(submitted[0].params.clientUserMessageId, submitted[1].params.clientUserMessageId);
+    assert.match(submitted[1].params.input[0].text, /修复原任务未完成部分/);
+    assert.match(submitted[1].params.input[0].text, /new-answer/);
+    await f.again(next).done;
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("validation correction keeps the new thread and root cancellation targets its current turn", async () => {
+  const f = await fixture("new-correction");
+  try {
+    await f.done;
+    f.again({ continuation: { revision: 1, reason: "verification failed" } });
+    const deadline = Date.now() + 5000;
+    while (f.calls.filter((x) => x.method === "turn/start").length < 2) {
+      assert.ok(Date.now() < deadline, "corrective turn did not start");
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    const stopped = await f.again({ cancel: true }).done;
+    assert.equal(codex.read(stopped.out, stopped.code, stopped.err).external, false);
+    assert.deepEqual(
+      f.calls.filter((x) => x.method === "turn/interrupt").map((x) => x.params),
+      [{ threadId: "original", turnId: "own-2" }],
+    );
+    assert.equal(f.calls.filter((x) => x.method === "thread/start").length, 1);
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("new inputs merged after a lost completed response are continued once without discarding the original result", async () => {
+  const f = await fixture("drop-complete");
+  try {
+    await f.done;
+    const next = { attempt: 2, inputIds: ['["local","original-event"]', '["answer","new-answer"]'] };
+    const r = await f.again(next).done;
+    assert.equal(codex.read(r.out, r.code, r.err).session, "original");
+    const starts = f.calls.filter((x) => x.method === "turn/start");
+    assert.equal(starts.length, 2);
+    assert.match(starts[1].params.input[0].text, /只处理.*新增/);
+    assert.match(starts[1].params.input[0].text, /new-answer/);
+    assert.match(starts[1].params.input[0].text, /不重做已完成业务/);
+    await f.again(next).done;
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an old completion arriving during recovery cannot finish newly merged work", async () => {
+  const f = await fixture("recovered-new-input");
+  try {
+    await f.done;
+    const old = JSON.parse(readFileSync(f.receiptFile, "utf8"));
+    delete old.status;
+    writeFileSync(f.receiptFile, JSON.stringify(old));
+    let ended = false;
+    const correction = f.again({ attempt: 2, inputIds: ['["local","original-event"]', '["answer","new-answer"]'] });
+    void correction.done.then(() => {
+      ended = true;
+    });
+    const deadline = Date.now() + 5000;
+    while (f.calls.filter((x) => x.method === "turn/start").length < 2) {
+      assert.ok(Date.now() < deadline);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(ended, false);
+    const stopped = await f.again({ cancel: true }).done;
+    assert.equal(codex.read(stopped.out, stopped.code, stopped.err).external, false);
+    assert.equal(f.calls.findLast((x) => x.method === "turn/interrupt").params.turnId, "own-2");
+  } finally {
+    await f.close();
+  }
+});
+
+test("legacy completed receipts need proof of unchanged inputs before settling a later attempt", async () => {
+  const f = await fixture("legacy-inputs");
+  try {
+    await f.done;
+    const old = JSON.parse(readFileSync(f.receiptFile, "utf8"));
+    delete old.inputs;
+    writeFileSync(f.receiptFile, JSON.stringify(old));
+    const unknown = await f.again({ attempt: 2 }).done;
+    assert.match(codex.read(unknown.out, unknown.code, unknown.err).error!, /缺少输入身份/);
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+    const prior = join(home, "worker", "runs", "90017-1");
+    mkdirSync(prior, { recursive: true });
+    writeFileSync(join(prior, "context.json"), JSON.stringify({ events: [{ source: "local", id: "original-event" }] }));
+    const proven = await f.again({ attempt: 2 }).done;
+    assert.equal(codex.read(proven.out, proven.code, proven.err).text, "remembered context: iris-728; blue");
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+  } finally {
+    await f.close();
   }
 });
 

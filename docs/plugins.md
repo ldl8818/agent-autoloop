@@ -33,7 +33,7 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 | `link(session)`              | 可选，打开这个会话的链接。回执写错时，`read` 返回了 `session` 的插件都只重写回执，和有没有链接无关                            |
 | `check(program)`             | 可选，`doctor` 问它这个 Agent 现在能不能用：能用返回 `null`，否则返回下一步怎么做。参数是规则里给它写的 `program`，没写就不传 |
 
-`turn` 一定有的是 `prompt`、`session`、`resume`、`cwd`、`access`、`contextFile`、`folder`，另外五个只有规则里给这个 Agent 写了才有：`model`、`effort`、`tier`、`command`、`program`。`resume` 是这一轮要接回的原会话，新开一轮时是 `null`。`contextFile` 是资料文件，受限 CLI 需要允许读取 `folder`。`program` 是内置插件换成的启动程序，第三方插件用不上，收下也可以不理。`tier` 是服务档位，用的是那个 CLI 自己的叫法，现在只有内置的 Codex 插件用它（传成 `-c service_tier="…"`，`priority` 就是 Codex 应用里的 Fast），别的插件收下不理。那五个都按「可能没有」来读，内置插件就是这么写的：`...(turn.model ? ["--model", turn.model] : [])`、`turn.command ?? []`。`read` 要能处理未写完的输出；CLI 真正完成后才返回 `text`。`read` 抛错或什么也不返回时，还在跑的接着跑，结束后这一轮算没跑成，留在原会话重派。
+`turn` 一定有的是 `prompt`、`session`、`resume`、`cwd`、`access`、`contextFile`、`folder`，另外五个只有规则里给这个 Agent 写了才有：`model`、`effort`、`tier`、`command`、`program`。`resume` 是这一轮要接回的原会话，新开一轮时是 `null`。`contextFile` 是资料文件，受限 CLI 需要允许读取 `folder`。`program` 是内置插件换成的启动程序，第三方插件用不上，收下也可以不理。`tier` 是服务档位，用的是那个 CLI 自己的叫法，现在只有内置的 Codex 插件用它（传成 App Server 的 `serviceTier`，`priority` 就是 Codex 应用里的 Fast），别的插件收下不理。那五个都按「可能没有」来读，内置插件就是这么写的：`...(turn.model ? ["--model", turn.model] : [])`、`turn.command ?? []`。`read` 要能处理未写完的输出；CLI 真正完成后才返回 `text`。`read` 抛错或什么也不返回时，还在跑的接着跑，结束后这一轮算没跑成，留在原会话重派。
 
 支持 `resume` 的插件，从 Agent 收下提示词起都要返回 `started: true`，包括运行中和出错之后。否则干到一半断了，也会被当成会话接不上，开新会话把业务重做一遍。返回了 `session` 就要按 `turn.resume` 接回原会话：没跑成的重派和写错回执的重写都靠它；接不回去的 CLI 不要返回 `session`。
 
@@ -41,19 +41,27 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 
 ### Codex 会话标题
 
-内置 Codex 插件在执行进程退出后，将该任务的原生标题统一为 `autoloop-事项｜目标`。已有标题保留正文；只有原生标题为空时，使用可信规则的 `title`（支持原有占位符），未写则使用规则名。正文缺少分隔符时，在前面加工作目录名；重复命名不叠加前缀。
+内置 Codex 插件在取得会话编号后、提交本轮工作前，将该任务的原生标题统一为 `autoloop-事项｜目标`。已有标题保留正文；只有原生标题为空时，使用可信规则的 `title`（支持原有占位符），未写则使用规则名。正文缺少分隔符时，在前面加工作目录名；重复命名不叠加前缀。
 
-命名通过独立的官方 `app-server proxy` 连接，只调用 `thread/read` 和 `thread/name/set`，写入后再读回。不调用 `thread/resume` 或 `turn/start`，不经过自定义 `program` 执行业务脚本。标题接口不可用时记录提示，保留原业务输出和退出状态；取消控制不触发命名。它不批量修改历史会话，原任务下一轮自然执行后才处理标题。
+命名复用本轮官方 App Server 连接，只调用 `thread/read` 和 `thread/name/set`，写入后再读回；不为命名额外提交业务。标题接口不可用时记录提示，业务仍继续；取消控制不触发命名。不批量修改历史会话，原任务下一轮自然执行时处理标题。
 
 `turn.title` 是接单程序从可信规则解析的显示标题；其他 Agent 插件可忽略，不改变现有协议。
 
 ### Codex 原会话续接
 
-普通 Codex 任务先用 `codex exec resume` 接回原会话。若桌面共享服务持有会话写入锁，且本轮尚未开始执行，插件通过官方 `app-server proxy` 接入持有者，按同一个 `threadId` 续接。原会话空闲就继续；正在执行就保留回答，收到空闲通知后自动继续，不重复提交，也不因此新开会话。其他会话的工作仍按中台并发额度运行。连接失败保留原会话，由中台按原重派规则处理；模型已开始执行的 CLI 失败不再转交共享服务重跑。
+Codex 新任务和原会话接续均通过官方 `app-server proxy` 接入桌面使用的同一 App Server。新任务调用 `thread/start` 并保存编号，再提交工作；已有任务调用 `thread/resume`，沿同一个 `threadId` 接续。原会话空闲就继续；正在执行就保留回答，收到空闲通知后继续，不另开会话。服务不可用时保留任务及错误，不回退到独立 `codex exec`。
 
-共享服务的一轮沿用可信任务的目录、权限、模型、推理强度和服务档位；只收当前会话、当前轮次的结果。提交前保存请求标识，断线后先读回原轮次，不重新提交；已完成的回答保存在本机 `worker/codex/`，重复启动只重交原回执。无法核实已提交请求时保留记录，不猜测执行结果。
+每轮显式传入可信规则的目录和权限；`full` 对应 `danger-full-access`，审批策略始终为 `never`，模型、推理强度和服务档位沿规则。`never` 不会突破 `read`、`edit` 的沙箱限制。是否批准业务由原卡片及规则决定，已有批准不因重试失效，技术权限不扩大业务范围。Claude Code 的启动、权限映射和接续保持原样。
 
-共享接续在 macOS 和 Linux 开启。Windows 保留 CLI 续接；写入冲突保留原会话，待原持有者释放后由中台重派，不进入尚未支持确认停止的共享路径。连接用随机能力地址保护的一次性本机转接，不增加常驻服务，不删除会话锁，也不重启桌面应用。实现依据是 [Codex App Server](https://learn.chatgpt.com/docs/app-server) 的 `thread/resume`、`turn/start`、`thread/status/changed` 和 `turn/interrupt`，接口以本机 CLI 生成的 schema 为准。
+提交前保存请求标识，断线后按原轮次读回，不能确认结果时不重新提交；已完成的回答保存在本机 `worker/codex/`，没有新输入，且没有需要继续处理的已确认失败时，重复启动只重交原回执。已确认的业务失败按中台重试次数续接，可信包装器的验证失败按验证代次续接；都保留原请求和会话身份，取消仍指向当前轮次。失败等待期间合并的新输入按不可变事件编号识别，旧结果读回后只处理剩余工作和新增输入，不能静默结清新请求。旧格式记录缺少输入身份时，先核对此前轮次的资料；证据不足保留结果与待办，不猜测新旧输入。新会话创建成功后先保存编号，未知的创建结果保留记录；停止只中断本次拥有的轮次。旧版共享接续记录仍可用于升级后的读回和停止。
+
+连接使用随机能力地址保护的一次性本机转接，不增加常驻服务，不删除会话锁，也不重启桌面应用。运行机需有支持该协议的 Codex 和正在运行的官方 App Server；Mac Mini 的0.169.0已验证，其他设备与平台须各自验收。实现依据是 [Codex App Server](https://learn.chatgpt.com/docs/app-server)，接口以本机 CLI 生成的 schema 为准。
+
+### 项目执行包装
+
+可信 Agent 配置可写 `wrapper`，用于在完整的适配器命令前后准备项目和核验结果；接单程序以参数数组调用 `wrapper <适配器程序> <参数…>`，包装器负责执行收到的命令并保留退出码、会话及结果事件。停止控制直接使用适配器，不重跑项目准备或交付。事件正文与卡片回答不能指定包装器。
+
+`program` 仍指定 CLI 程序或透明转发脚本。Codex 的该程序必须支持 `app-server proxy` 与 `login status`；在代理进程里设置变量不会改变已运行服务的模型凭据或工具环境。需要执行前后处理的 Codex 脚本改用 `wrapper`，不要包在二进制代理通道外。该字段可选，不改变未配置它的 Agent；旧版本不识别 `wrapper`，先升级中台和接单程序，再启用配置。
 
 `turn.requestId` 是接单程序给同一轮及回执重写分别提供的稳定标识，重派不改变它。插件在本地进程之外仍有任务时，`read` 返回 `external: true`；确认该任务结束后才返回 `false`。停止和超时都必须确认外部任务已经结束。暂时无法确认时，接单程序保留记录、不提交结束回执，也不占本地执行额度；中台沿用租约机制标记结果未知，其他任务照常处理。可选的 `cancel(turn)` 只生成停止控制命令，恢复后继续确认原轮次，不能提交业务提示词。确认后，本人停止按 `cancelled` 结案，超时仍按 `failed` 交回。旧插件和原有 HTTP 协议不变。
 
@@ -77,7 +85,7 @@ ZCode 有内置 `zcode` 插件，规则里写 `use: "zcode"`。它启动随桌�
 
 ### 浏览器接入
 
-浏览器工具装在运行 Agent 的电脑上，由该 CLI 的工具配置或项目 Skill 提供。Codex 插件启动的是后台 [`codex exec`](https://developers.openai.com/codex/noninteractive/)；可以使用它已配置的 [MCP 工具](https://developers.openai.com/codex/mcp/)，不能只凭桌面应用能打开网页就认定后台也能访问同一浏览器。
+浏览器工具装在运行 Agent 的电脑上，由该 CLI 的工具配置或项目 Skill 提供。Codex 插件使用桌面共用的 App Server；可以使用它已配置的 [MCP 工具](https://developers.openai.com/codex/mcp/)，不能只凭桌面应用能打开网页就认定后台也能访问同一浏览器。
 
 Claude 委托 Codex 的完整规则、Skill 和参数调用脚本见[浏览器交接模板](../examples/recipes/browser-handoff/README.md)。入口命令、目标与允许操作由本人配置；网页助手返回证据和会话编号，主任务负责业务与回执。
 

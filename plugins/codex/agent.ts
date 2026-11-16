@@ -1,12 +1,16 @@
-// Codex: the user's own, installed and signed in by them. A run is a `codex exec` in the background; its thread is kept
-// on disk, so a retry or an answer can go on in it, and the link opens it in the app.
+// New tasks and continuations share Desktop's official App Server; the bridge persists submission identities.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { commandLine, powershell, psQuote } from "../../host/command.ts";
 import { stablePath } from "../../host/node-path.ts";
 import { findProgram, tail, type Adapter } from "../../worker/agents.ts";
+import { readMessage } from "../../worker/contract.ts";
 
-const SANDBOX = { read: "read-only", edit: "workspace-write", full: "danger-full-access" };
+export function resultText(text: string) {
+  const candidate = text.trimStart().replace(/^主人[，,：:\s]+/, "");
+  return candidate !== text && readMessage(candidate).outcome === "failed" ? candidate : text;
+}
+
 export const IN_THE_APP = [
   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
   "/Applications/Codex.app/Contents/Resources/codex",
@@ -24,47 +28,22 @@ const adapter: Adapter = {
       $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'Read', 'Allow'))
       [IO.File]::SetAccessControl($file, $acl)
     `);
-    const argv = [
-      turn.program ?? findProgram("codex", () => IN_THE_APP),
-      "exec",
-      ...(turn.resume ? ["resume"] : []),
-      "--json",
-      "--skip-git-repo-check",
-      ...(turn.model ? ["-m", turn.model] : []),
-      ...(turn.effort ? ["-c", `model_reasoning_effort="${turn.effort}"`] : []),
-      // Unset, a run takes the tier in ~/.codex/config.toml, a file the Codex app shares: "priority" is its Fast.
-      ...(turn.tier ? ["-c", `service_tier="${turn.tier}"`] : []),
-      // As config, because `codex exec resume` takes no -s.
-      "-c",
-      `sandbox_mode="${SANDBOX[turn.access]}"`,
-      "-c",
-      'approval_policy="never"',
-      ...(turn.resume ? [turn.resume] : []),
-      "本轮通过后台 codex exec 运行，不要假定桌面应用的浏览器连接已带到本轮。" +
-        "网页操作使用本轮实际可用的浏览器工具，或使用规则或 Skill 中已明确配置的浏览器入口。" +
-        "沿用该入口的会话，只交网页步骤，业务处理和中台回执仍由本轮负责；没有可用入口或需要本人恢复连接时，按待你处理的约定交回。\n\n" +
-        turn.prompt,
+    return [
+      stablePath(process.execPath),
+      "--disable-warning=ExperimentalWarning",
+      join(import.meta.dirname, "resume.ts"),
+      JSON.stringify({
+        program: turn.program ?? findProgram("codex", () => IN_THE_APP),
+        turn: {
+          ...turn,
+          prompt:
+            "本轮通过桌面共用的 Codex App Server 运行，不要假定桌面应用的浏览器连接已带到本轮。" +
+            "网页操作使用本轮实际可用的浏览器工具，或使用规则或 Skill 中已明确配置的浏览器入口。" +
+            "业务处理和中台回执仍由本轮负责；需要本人恢复连接时，按待你处理的约定交回。\n\n" +
+            turn.prompt,
+        },
+      }),
     ];
-    const command = turn.resume
-      ? [
-          stablePath(process.execPath),
-          "--disable-warning=ExperimentalWarning",
-          join(import.meta.dirname, "resume.ts"),
-          JSON.stringify({ turn, argv, shared: process.platform !== "win32" }),
-        ]
-      : argv;
-    return turn.title && !turn.cancel
-      ? [
-          stablePath(process.execPath),
-          "--disable-warning=ExperimentalWarning",
-          join(import.meta.dirname, "title.ts"),
-          JSON.stringify({
-            argv: command,
-            cwd: turn.cwd,
-            title: turn.title,
-          }),
-        ]
-      : command;
   },
   cancel: (turn) => adapter.command({ ...turn, resume: turn.resume ?? turn.session, cancel: true }),
   read(stdout, code, stderr) {
@@ -112,6 +91,7 @@ const adapter: Adapter = {
     const { completed, ...reading } = seen;
     // Only a finished turn's last message is its answer; before that it's only as far as it had got.
     if (!completed) delete reading.text;
+    if (reading.text) reading.text = resultText(reading.text);
     if (code !== null && !completed && !reading.error) reading.error = tail(stderr) || "Codex 没有完成并留下实际结果";
     if (completed && !reading.text?.trim()) reading.error = "Codex 没有完成并留下实际结果";
     return reading;

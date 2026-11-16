@@ -249,9 +249,13 @@ export function createWorker({
       contextFile: path.join(entry.dir, "context.json"),
       folder: entry.dir,
       requestId: `${entry.run}:${entry.repairs ?? 0}`,
+      attempt: entry.attempt,
+      inputIds: entry.job.context.events.map(({ source, id }) => JSON.stringify([source, id])),
     };
     if (!existsSync(cwd)) throw new Error(`在 ${cwd} 启动不了：这个目录不存在`);
-    const argv = cancelling ? adapter.cancel!(turn) : adapter.command(turn);
+    const commandArgs = cancelling ? adapter.cancel!(turn) : adapter.command(turn);
+    // Trusted project lifecycle wraps the adapter command, never its daemon transport or stop controller.
+    const argv = agent.wrapper && !cancelling ? [agent.wrapper, ...commandArgs] : commandArgs;
     const { out, err, exit, command } = files(entry);
     if (process.platform === "win32") {
       writeFileSync(command, JSON.stringify({ argv, cwd, exit }), { mode: 0o600 });

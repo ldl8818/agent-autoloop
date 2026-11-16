@@ -8,6 +8,7 @@ type AgentOptions = {
   tier?: string;
   command?: string[];
   program?: string;
+  wrapper?: string;
   timeout?: number;
 };
 export type Agent = AgentOptions & { name: string; worker: string; use: string; access: Access; maxActive?: number };

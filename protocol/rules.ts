@@ -179,6 +179,7 @@ export function parseRules(json: string, now: number, timezone: string): Rules {
       ["access", (value) => ACCESS.includes(value as string), `只能是 ${ACCESS.join("、")}`, true],
       ["command", isSomeWords, "要是命令行的列表", !isObject(agent) || agent.use !== "command"],
       ["program", isText, "要是一个程序的路径", true],
+      ["wrapper", isText, "要是一个程序的路径", true],
       ["timeout", isCount, "要是正整数（分钟）", true],
       ["maxActive", isCount, "要是正整数", true],
     ]);

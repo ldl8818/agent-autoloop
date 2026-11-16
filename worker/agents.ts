@@ -30,6 +30,12 @@ export type Turn = {
   folder: string;
   /** Stable across retries of this logical launch; receipt repairs have their own identity. */
   requestId?: string;
+  /** Hub retry count; only an acknowledged business failure may start another completed request. */
+  attempt?: number;
+  /** A trusted lifecycle's acknowledged validation failure, distinct from a transport retry. */
+  continuation?: { revision: number; reason: string };
+  /** Immutable event identities, so a retry cannot silently consume newly merged work. */
+  inputIds?: string[];
   /** Stop-control invocation only; never submit a business prompt. */
   cancel?: boolean;
 };

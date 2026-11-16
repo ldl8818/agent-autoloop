@@ -39,7 +39,7 @@ WSL2 仍按 Linux 安装；常驻服务需要发行版开启 systemd，没开则
 curl -fsSL https://raw.githubusercontent.com/KKKKhazix/agent-autoloop/main/install.sh | sh
 ```
 
-GitHub Issue 轮询和 PR 交付等功能另需已登录的 `gh`，按对应场景说明配置；运行 Agent 也仍需该 Agent 自己的登录或授权。中台在后台启动 Agent，桌面应用里能用的浏览器和电脑操作它不一定用得上（比如 Codex 应用里的 Chrome，后台的 `codex exec` 用不到）；要它操作网页，照[浏览器接入](docs/plugins.md#浏览器接入)配好，再用后台的启动方式实际跑一次。
+GitHub Issue 轮询和 PR 交付等功能另需已登录的 `gh`，按对应场景说明配置；运行 Agent 也仍需该 Agent 自己的登录或授权。中台在后台启动 Agent，桌面应用里能用的浏览器和电脑操作它不一定用得上（Codex 即使共用 App Server，也需要本轮实际获得相应工具连接）；要它操作网页，照[浏览器接入](docs/plugins.md#浏览器接入)配好，再用后台的启动方式实际跑一次。
 
 安装和 `agent-autoloop update` 都装最新的 Release，那是通过了全部检查的版本，`main` 上还没发布的改动要等下一个 Release。
 

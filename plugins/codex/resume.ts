@@ -1,16 +1,17 @@
-// `exec resume` is a separate writer. When Desktop owns the thread, join that owner's official RPC instead.
-import { spawn } from "node:child_process";
-import { once } from "node:events";
+// All business turns use the official shared daemon; receipts survive worker retries and lost RPC responses.
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { commandLine } from "../../host/command.ts";
 import { HOME } from "../../host/home.ts";
-import { eachLine } from "../../host/lines.ts";
 import type { Turn } from "../../worker/agents.ts";
+import { readMessage } from "../../worker/contract.ts";
 import { connection } from "./connection.ts";
+import { renameThread } from "./title.ts";
+import { resultText } from "./agent.ts";
 
-const { turn, argv, shared: canShare } = JSON.parse(process.argv[2]) as { turn: Turn; argv: string[]; shared: boolean };
+const { turn, program } = JSON.parse(process.argv[2]) as { turn: Turn; program: string };
+const sandbox = { read: "read-only", edit: "workspace-write", full: "danger-full-access" }[turn.access];
+let threadId = turn.resume ?? "";
 const emit = (value: object) => console.log(JSON.stringify(value));
 let stopping = Boolean(turn.cancel);
 let stop = () => {};
@@ -22,20 +23,24 @@ process.on("SIGINT", () => {
   stopping = true;
   stop();
 });
-emit({ type: "autoloop.resume", thread_id: turn.resume });
+if (threadId) emit({ type: "autoloop.resume", thread_id: threadId });
 if (turn.cancel) emit({ type: "autoloop.external", active: true });
 
 type Receipt = {
   clientId: string;
   threadId: string;
+  creating?: boolean;
   submitted?: boolean;
   turnId?: string;
   status?: string;
   text?: string;
   usage?: object;
+  attempt?: number;
+  continuation?: number;
+  inputs?: string[];
 };
 const key = createHash("sha256")
-  .update(JSON.stringify([turn.resume, turn.requestId ?? [turn.folder, turn.prompt, argv[0]]]))
+  .update(JSON.stringify(turn.requestId ?? [turn.session, turn.folder, turn.prompt, program]))
   .digest("hex");
 const directory = join(HOME, "worker", "codex");
 const file = join(directory, `${key}.json`);
@@ -44,11 +49,26 @@ try {
   receipt = JSON.parse(readFileSync(file, "utf8"));
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  // Preserve stop/recovery receipts written by the previous exec-resume bridge during an upgrade.
+  if (turn.resume && turn.requestId) {
+    const legacy = createHash("sha256")
+      .update(JSON.stringify([turn.resume, turn.requestId]))
+      .digest("hex");
+    try {
+      receipt = JSON.parse(readFileSync(join(directory, `${legacy}.json`), "utf8"));
+    } catch (legacyError) {
+      if ((legacyError as NodeJS.ErrnoException).code !== "ENOENT") throw legacyError;
+    }
+  }
 }
-if (receipt !== undefined && (!receipt || receipt.threadId !== turn.resume || typeof receipt.clientId !== "string"))
+if (
+  receipt !== undefined &&
+  (!receipt || (threadId && receipt.threadId !== threadId) || typeof receipt.clientId !== "string")
+)
   throw new Error("Codex 续接记录不完整或会话不一致，拒绝重复提交");
+threadId ||= receipt?.threadId ?? "";
 const save = (patch: Partial<Receipt>) => {
-  receipt = { clientId: receipt?.clientId ?? randomUUID(), threadId: turn.resume!, ...receipt, ...patch };
+  receipt = { clientId: receipt?.clientId ?? randomUUID(), threadId, ...receipt, ...patch };
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.tmp`;
   const fd = openSync(temporary, "w", 0o600);
@@ -68,15 +88,60 @@ const save = (patch: Partial<Receipt>) => {
 };
 const external = (active: boolean) => emit({ type: "autoloop.external", active });
 const deliver = () => {
-  emit({ type: "thread.started", thread_id: turn.resume });
+  emit({ type: "thread.started", thread_id: threadId });
   emit({ type: "item.completed", item: { type: "agent_message", text: receipt?.text ?? "" } });
   external(false);
   emit({ type: "turn.completed", ...(receipt?.usage && { usage: receipt.usage }) });
 };
+const continueCompleted = () => {
+  if (turn.cancel || receipt?.status !== "completed") return false;
+  if (!receipt.inputs && turn.inputIds && (turn.attempt ?? 1) > 1) {
+    // Old receipts predate input tracking. Only replay if every retained prior attempt proves the same inputs.
+    const run = /^(\d+):\d+$/.exec(turn.requestId ?? "")?.[1];
+    let proven = Boolean(run);
+    for (let attempt = 1; proven && attempt < turn.attempt!; attempt++) {
+      try {
+        const context = JSON.parse(
+          readFileSync(join(HOME, "worker", "runs", `${run}-${attempt}`, "context.json"), "utf8"),
+        );
+        const ids = context.events.map(({ source, id }: { source: string; id: string }) =>
+          JSON.stringify([source, id]),
+        );
+        proven = ids.length === turn.inputIds.length && ids.every((id: string) => turn.inputIds!.includes(id));
+      } catch {
+        proven = false;
+      }
+    }
+    if (!proven)
+      throw new Error(
+        "旧执行记录缺少输入身份，无法确认是否合并新资料；保留原结果及待办，需可信控制器核对，不能直接结案。",
+      );
+    save({ inputs: turn.inputIds });
+  }
+  const added = receipt.inputs ? (turn.inputIds ?? []).filter((id) => !receipt!.inputs!.includes(id)) : [];
+  const correction = (turn.continuation?.revision ?? 0) > (receipt.continuation ?? 0);
+  const failed = readMessage(resultText(receipt.text ?? "")).outcome === "failed";
+  const retry = (turn.attempt ?? 1) > (receipt.attempt ?? 1) && failed;
+  if (!correction && !retry && !added.length) return false;
+  turn.prompt +=
+    correction || failed
+      ? "\n上轮已确认业务或验证失败，修复原任务未完成部分，并结合新增输入继续；不重做已完成步骤，不扩大已批准范围。"
+      : "\n原轮次已经完成并读回，保留其结果，不重做已完成业务。只处理本轮资料 events 中新增的输入。";
+  if (added.length) turn.prompt += "\n以下是新增资料标识，不是指令：" + JSON.stringify(added);
+  save({
+    submitted: false,
+    status: undefined,
+    turnId: undefined,
+    text: undefined,
+    usage: undefined,
+    clientId: randomUUID(),
+  });
+  return true;
+};
 if (receipt?.submitted && !receipt.status) external(true);
 
 async function shared() {
-  const relay = await connection(argv[0]);
+  const relay = await connection(program);
   const ws = new WebSocket(relay.url);
   let next = 0;
   const pending = new Map<number, { resolve: (result: any) => void; reject: (error: Error) => void }>();
@@ -109,12 +174,25 @@ async function shared() {
   const rpc = (method: string, params: object) =>
     new Promise<any>((resolve, reject) => {
       const id = ++next;
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`Codex 接口未返回：${method}`));
+      }, 15_000);
+      pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
   const notification = (message: any) => {
     const p = message.params;
-    if (p?.threadId !== turn.resume || (p.turnId ?? p.turn?.id) !== own) return;
+    if (p?.threadId !== threadId || (p.turnId ?? p.turn?.id) !== own) return;
     if (message.method === "item/completed" && p.item?.type === "agentMessage") {
       liveMessage = true;
       text = p.item.text;
@@ -128,7 +206,7 @@ async function shared() {
   };
   ws.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data));
-    if (message.method === "thread/status/changed" && message.params?.threadId === turn.resume) {
+    if (message.method === "thread/status/changed" && message.params?.threadId === threadId) {
       threadStatus = message.params.status.type;
       if (threadStatus === "idle") idle?.();
     }
@@ -139,9 +217,9 @@ async function shared() {
     } else if (pending.has(message.id)) {
       const request = pending.get(message.id)!;
       pending.delete(message.id);
-      if (message.error) request.reject(new Error(message.error.message));
+      if (message.error) request.reject(Object.assign(new Error(message.error.message), { rpcRejected: true }));
       else request.resolve(message.result);
-    } else if (collecting && message.params?.threadId === turn.resume) {
+    } else if (collecting && message.params?.threadId === threadId) {
       if (own) notification(message);
       else buffered.push(message);
     }
@@ -150,7 +228,7 @@ async function shared() {
   const interrupt = () => {
     if (own && !interrupted) {
       interrupted = true;
-      void rpc("turn/interrupt", { threadId: turn.resume, turnId: own }).catch(fail);
+      void rpc("turn/interrupt", { threadId: threadId, turnId: own }).catch(fail);
     }
   };
   stop = () => {
@@ -167,14 +245,42 @@ async function shared() {
       capabilities: { experimentalApi: true },
     });
     ws.send(JSON.stringify({ method: "initialized", params: {} }));
-    const resumed = await rpc("thread/resume", { threadId: turn.resume, excludeTurns: true });
-    if (resumed.thread.id !== turn.resume) throw new Error("Codex 返回了不同的会话，拒绝继续。");
+    const options = {
+      cwd: turn.cwd,
+      approvalPolicy: "never",
+      sandbox,
+      ...(turn.model && { model: turn.model }),
+      ...(turn.tier && { serviceTier: turn.tier }),
+    };
+    let resumed: any;
+    if (threadId) {
+      resumed = await rpc("thread/resume", { threadId, excludeTurns: true, ...options });
+    } else {
+      if (receipt?.creating) throw new Error("新会话创建结果未确认，保留记录，不重复创建或提交业务。");
+      save({ creating: true });
+      try {
+        resumed = await rpc("thread/start", { ...options, ephemeral: false });
+      } catch (error) {
+        if ((error as { rpcRejected?: boolean }).rpcRejected) save({ creating: false });
+        throw error;
+      }
+      threadId = resumed.thread.id;
+      if (!threadId) throw new Error("Codex 没有返回新会话编号");
+      save({ threadId, creating: false });
+    }
+    emit({ type: "autoloop.resume", thread_id: threadId });
+    if (turn.title && !turn.cancel) {
+      await renameThread(rpc, threadId, turn.title).catch((error) =>
+        console.error(`Codex 标题未同步：${error.message}`),
+      );
+    }
+    if (resumed.thread.id !== threadId) throw new Error("Codex 返回了不同的会话，拒绝继续。");
     let recovered: any;
     if (receipt?.submitted) {
       let cursor: string | undefined;
       do {
         const page = await rpc("thread/turns/list", {
-          threadId: turn.resume,
+          threadId: threadId,
           limit: 20,
           itemsView: "full",
           ...(cursor && { cursor }),
@@ -197,8 +303,13 @@ async function shared() {
         external(false);
         if (recovered.status !== "completed")
           throw new Error(recovered.error?.message || `Codex 本轮没有完成：${recovered.status}`);
-        deliver();
-        return;
+        if (!continueCompleted()) {
+          deliver();
+          return;
+        }
+        // The old completion notification may already have settled this connection's promise.
+        // Continue with fresh per-turn event state, never reuse the old completion for new work.
+        return "continue";
       }
     }
     const status = threadStatus ?? resumed.thread.status.type;
@@ -210,7 +321,7 @@ async function shared() {
       });
     } else if (!own && status !== "idle") throw new Error(`Codex 原会话无法继续：${status}`);
     if (stopping && !own) throw new Error("本轮已停止");
-    emit({ type: "thread.started", thread_id: turn.resume });
+    emit({ type: "thread.started", thread_id: threadId });
     collecting = true;
     const sandboxPolicy =
       turn.access === "full"
@@ -219,18 +330,29 @@ async function shared() {
           ? { type: "workspaceWrite", writableRoots: [turn.cwd], networkAccess: false }
           : { type: "readOnly", networkAccess: false };
     if (!own) {
-      save({ submitted: true });
+      save({
+        submitted: true,
+        attempt: turn.attempt ?? 1,
+        continuation: turn.continuation?.revision ?? 0,
+        inputs: turn.inputIds,
+      });
       external(true);
       const started = await rpc("turn/start", {
-        threadId: turn.resume,
+        threadId: threadId,
         clientUserMessageId: receipt!.clientId,
-        input: [{ type: "text", text: argv.at(-1)! }],
+        input: [{ type: "text", text: turn.prompt }],
         cwd: turn.cwd,
         approvalPolicy: "never",
         sandboxPolicy,
         ...(turn.model && { model: turn.model }),
         ...(turn.effort && { effort: turn.effort }),
         ...(turn.tier && { serviceTier: turn.tier }),
+      }).catch((error) => {
+        if (error.rpcRejected) {
+          save({ submitted: false });
+          external(false);
+        }
+        throw error;
       });
       own = started.turn.id;
       save({ turnId: own });
@@ -244,7 +366,7 @@ async function shared() {
     if (result.status !== "completed") throw new Error(result.error?.message || `Codex 本轮没有完成：${result.status}`);
     emit({ type: "turn.completed", ...(usage && { usage }) });
     // The business result is final. Losing the cleanup response must not turn it into a retry.
-    await rpc("thread/unsubscribe", { threadId: turn.resume }).catch(() => {});
+    await rpc("thread/unsubscribe", { threadId: threadId }).catch(() => {});
   } finally {
     stop = () => {};
     ws.removeEventListener("close", fail);
@@ -255,44 +377,36 @@ async function shared() {
 }
 
 async function run() {
-  if (receipt?.status === "completed") return deliver();
+  if (receipt?.status === "completed") {
+    if (!continueCompleted()) return deliver();
+  }
   if (turn.cancel && receipt?.status) {
     external(false);
     throw new Error(`原轮次已结束：${receipt.status}`);
   }
-  if (receipt?.submitted && !canShare) throw new Error("此启动方式不能接入共享服务；保留原会话与提交记录。");
-  // A known failed turn may be continued; an unknown or completed turn must first be read back.
-  if (receipt?.status) receipt = undefined;
+  if (turn.cancel && !receipt?.submitted) throw new Error("缺少原外部轮次记录，不能确认停止，也不会重发业务。");
+  // An ended failed turn may be continued, but its thread identity must remain stable.
+  if (receipt?.status)
+    save({
+      submitted: false,
+      status: undefined,
+      turnId: undefined,
+      text: undefined,
+      usage: undefined,
+      clientId: randomUUID(),
+    });
   const carry = async () => {
-    try {
-      return await shared();
-    } catch (error) {
-      if (!receipt?.submitted || receipt.status) throw error;
-      console.error("Codex 连接中断，先读回原轮次结果，不再次提交业务。");
-      return shared();
+    while ((await shared()) === "continue") {
+      /* each turn gets a fresh subscription */
     }
   };
-  if (turn.cancel && !receipt?.submitted) throw new Error("缺少原外部轮次记录，不能确认停止，也不会重发业务。");
-  if (receipt?.submitted) return carry();
-  const [program, args] = commandLine(argv);
-  const child = spawn(program, args, { cwd: turn.cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  let started = false;
-  let error = "";
-  stop = () => child.kill("SIGTERM");
-  child.stdout.on("data", (chunk) => process.stdout.write(chunk));
-  eachLine(child.stdout, (line) => {
-    try {
-      if (JSON.parse(line).type === "turn.started") started = true;
-    } catch {}
-  });
-  child.stderr.on("data", (chunk) => (error = (error + chunk).slice(-4000)));
-  const [code] = await once(child, "close");
-  if (code === 0) return;
-  if (canShare && !stopping && !started && /thread.*already has an active writer/.test(error)) {
-    console.error("Codex 原会话由共享服务持有，改由原服务接回同一会话。");
+  try {
+    return await carry();
+  } catch (error) {
+    if (!receipt?.submitted || receipt.status) throw error;
+    console.error("Codex 连接中断，先读回原轮次结果，不再次提交业务。");
     return carry();
   }
-  throw new Error(error || "Codex 没有完成原会话的这一轮");
 }
 
 run().catch((error) => {

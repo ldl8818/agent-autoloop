@@ -502,6 +502,9 @@
             "program": {
               "type": "string"
             },
+            "wrapper": {
+              "type": "string"
+            },
             "timeout": {
               "type": "integer",
               "minimum": 1

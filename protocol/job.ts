@@ -14,6 +14,7 @@ export type Job = {
     access: string;
     command?: string[];
     program?: string;
+    wrapper?: string;
     timeout?: number;
   };
   session: string | null;

@@ -181,7 +181,7 @@ macOS／Linux 上，Codex 的桌面会话被保持载入时，也能接回原编
 
 **实测情况：** Claude Code、Codex 和 ACP（官方 Codex ACP 适配器）跑通了多轮问答和跨进程会话续接；ZCode 跑通了提问、回答后接回原会话；飞书跑通了发送、按钮回调和卡片更新；四种 Webhook 模板只在本地模拟服务上验证过，GitLab Webhook 按官方文档的格式测试，没连过真实 GitLab。这些文字通道靠回答链接拍板，要把 `hub.publicUrl` 配成手机或电脑能打开的地址。
 
-**内置 Agent 走第三方网关。** Claude Code、Codex 要接第三方模型服务，或者启动前要先设好环境变量，写一个设好变量再启动它的小脚本，在 Agent 里写 `"program": "脚本路径"`，会话续接和用量统计照旧，见[说明](skills/agent-autoloop/SKILL.md#接一个-agent)。
+**内置 Agent 的启动配置。** Claude Code 等 CLI 的 `program` 网关接法保持原样。Codex 新建和接续使用桌面共用的 App Server，服务配置决定模型入口；项目准备与交付使用 `wrapper`，见[项目执行包装](docs/plugins.md#项目执行包装)。
 
 **其他命令行 Agent 一行接入。** 设置 `use: "command"` 并传入命令数组，`{prompt}` 作为独立参数传递，不会被当成 shell 代码执行。下面的命令整理自各家官方文档，我们还没有逐个跑过：
 

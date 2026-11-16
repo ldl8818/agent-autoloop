@@ -57,6 +57,8 @@ test("the fixture loads, with defaults filled in", () => {
   const wrapped = good();
   wrapped.agents.a1.program = "/opt/bin/claude-via-gateway";
   assert.equal(parseRules(JSON.stringify(wrapped)).agents.a1.program, "/opt/bin/claude-via-gateway");
+  wrapped.agents.a1.wrapper = "/opt/bin/project-lifecycle";
+  assert.equal(parseRules(JSON.stringify(wrapped)).agents.a1.wrapper, "/opt/bin/project-lifecycle");
   wrapped.agents.a1.maxActive = 3;
   wrapped.rules[0].maxActive = 1;
   const limited = parseRules(JSON.stringify(wrapped));
