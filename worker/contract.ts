@@ -26,7 +26,7 @@ function describeEvent({ sourceName, type, subject, link }: Job["context"]["even
 }
 
 /** The rule's session title: {subject} is the one subject this run's events share, {id} its last part. */
-function titleOf({ rule, context }: Job) {
+export function titleOf({ rule, context }: Job) {
   if (!rule.title) return [];
   const subjects = unique(context.events.map((event) => event.subject).filter(Boolean));
   const subject = subjects.length === 1 ? subjects[0] : "";

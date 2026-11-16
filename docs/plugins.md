@@ -39,6 +39,14 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 
 `usage` 是这次启动用掉的量。`input` 算全部输入，`cached` 是其中从缓存读的部分；CLI 报的输入不含缓存时（Claude Code、DSH 就是这样），插件把缓存读写加回 `input`，各家才能放在一起比。有的 CLI 只给整个会话累计到现在的数（Codex 的 Token、Claude Code 的费用），这几项放进 `sessionUsage`，同时要返回 `session`。接单程序启动前记下这个会话上次的累计值，结束后相减，和 `usage` 合起来上报；这些记录放在 `~/.agent-autoloop/worker/usage/`，接单程序中途重启也不会多算。
 
+### Codex 会话标题
+
+内置 Codex 插件在执行进程退出后，将该任务的原生标题统一为 `autoloop-事项｜目标`。已有标题保留正文；只有原生标题为空时，使用可信规则的 `title`（支持原有占位符），未写则使用规则名。正文缺少分隔符时，在前面加工作目录名；重复命名不叠加前缀。
+
+命名通过独立的官方 `app-server proxy` 连接，只调用 `thread/read` 和 `thread/name/set`，写入后再读回。不调用 `thread/resume` 或 `turn/start`，不经过自定义 `program` 执行业务脚本。标题接口不可用时记录提示，保留原业务输出和退出状态；取消控制不触发命名。它不批量修改历史会话，原任务下一轮自然执行后才处理标题。
+
+`turn.title` 是接单程序从可信规则解析的显示标题；其他 Agent 插件可忽略，不改变现有协议。
+
 ### Codex 原会话续接
 
 普通 Codex 任务先用 `codex exec resume` 接回原会话。若桌面共享服务持有会话写入锁，且本轮尚未开始执行，插件通过官方 `app-server proxy` 接入持有者，按同一个 `threadId` 续接。原会话空闲就继续；正在执行就保留回答，收到空闲通知后自动继续，不重复提交，也不因此新开会话。其他会话的工作仍按中台并发额度运行。连接失败保留原会话，由中台按原重派规则处理；模型已开始执行的 CLI 失败不再转交共享服务重跑。

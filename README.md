@@ -12,6 +12,8 @@
 
 本地 Fork 的 `main` 使用原版任务处理方式，默认显示上游飞书卡片，并保留项目标题和卡片编号。Solo to Team 集成已停用，完整实现保存在 `feature/solo-to-team-integration` 分支。
 
+Codex 后台任务使用 `autoloop-事项｜目标` 的原生会话标题，方便与普通聊天区分，详见[命名说明](docs/plugins.md#codex-会话标题)。
+
 ## 它解决什么问题？
 
 平时我们用 Claude Code、Codex 这类命令行 Agent，大多是“人守着终端用”：你输一句话，盯着它跑，等它问你下一步；一旦关掉窗口或者人走开，事情就断了。

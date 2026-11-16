@@ -12,6 +12,8 @@ The owner can [correct a pending card](docs/protocol.md#更正待答卡片) pers
 
 This local fork's `main` uses the original task flow and upstream Feishu presentation by default, retaining project headings and card numbers. The disabled Solo to Team integration is preserved on `feature/solo-to-team-integration`.
 
+Codex background tasks use native session titles in the form `autoloop-topic｜goal`; see [session naming](docs/plugins.md#codex-会话标题).
+
 ## What problem does it solve?
 
 Most of us use command-line agents like Claude Code or Codex by babysitting a terminal: you type a prompt, watch it run, and answer its questions. Close the window or walk away, and the work stops.
