@@ -14,7 +14,7 @@
 
 本地同步与升级的验证范围见[本地 Fork 维护](AGENTS.md#本地-fork-维护)。
 
-Codex 后台任务使用 `autoloop-事项｜目标` 的原生会话标题，方便与普通聊天区分，详见[命名说明](docs/plugins.md#codex-会话标题)。
+Codex 后台任务使用 `autoloop-中文模块名｜持续目标` 的原生会话标题，方便与普通聊天区分，详见[命名说明](docs/plugins.md#codex-会话标题)。
 
 ## 它解决什么问题？
 

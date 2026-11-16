@@ -14,7 +14,7 @@ This local fork's `main` uses the original task flow and upstream Feishu present
 
 For local sync and upgrade verification, follow the [local fork maintenance rules](AGENTS.md#本地-fork-维护).
 
-Codex background tasks use native session titles in the form `autoloop-topic｜goal`; see [session naming](docs/plugins.md#codex-会话标题).
+Codex background tasks use native session titles in the form `autoloop-中文模块名｜持续目标` (Chinese module and ongoing goal); see [session naming](docs/plugins.md#codex-会话标题).
 
 ## What problem does it solve?
 

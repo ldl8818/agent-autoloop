@@ -19,12 +19,13 @@
 
 ## 未完成任务
 
-- Codex 会话来源标题随首次执行 App-Server 改造统一加载。
+- Autoloop 中文标题的自然新任务验收与源码交付。
   - 状态：待验证
-  - 接续条件：命名源码已提交749c9c0，本轮按主人要求只提交、合并，不部署；正式服务尚未加载。后续任务将 autoloop 的 Codex 首次执行改为 App-Server 模式，须保留 autoloop-事项｜目标、幂等命名和命名失败不影响业务的行为。
-  - 下一步：由后续 App-Server 改造任务统一部署，再从自然派单读回原生标题；不重跑历史业务，不批量修改历史会话。
-  - 分支／worktree：main；/Users/dylan/projects/agent-autoloop。当前命名任务的 feature/autoloop-session-title 工作区仍被本聊天占用，提交与合并后保留，待会话迁回且交付条件满足后清理。
-  - 证据位置：tests/codex-title.test.ts；plugins/codex/title.ts；docs/plugins.md 的「Codex 会话标题」。
+  - 已做到：Mac Mini 已定向部署 plugins/codex/title.ts 与 plugins/codex/resume.ts，源文件和安装文件哈希一致；三个正式服务 PID 保持7569／7570／7571，无重启。截图原会话已改为 autoloop-网站补抓｜正确识别等待与失败，原生列表读回一致，安装模块重复读写通过。
+  - 验证：最终25项标题与桥接专项、类型、相关文件格式、diff 检查及独立复审通过；覆盖只读网络限制、原失败、中文标题保留、恢复、幂等及命名失败不重做业务。两个原始失败回归已实跑。此前中间方案834项快速检查通过不作为最终方案全仓验收，按主人最新范围要求未追加全仓重跑。
+  - 下一步：下次自然新任务完成时，核对实际标题的中文模块和持续目标；不为命名另发模型任务或重做业务。本轮仅提交中文标题优化的源码、两份 README、docs/plugins.md、相关测试及本项记录，其他事项不纳入。推送遇到范围阻塞：本地 main 有6个既有未推送提交，含本功能依赖的 App Server 接入；仅推本次差异无法绕过前置历史，不默认授权一并推送。现役文件为本轮定向修补，下次整体安装升级须保留本轮源码。MacBook Air 未操作，桌面未截图验收。
+  - 分支／worktree：main；/Users/dylan/projects/agent-autoloop。
+  - 证据位置：~/.agent-autoloop/evidence/chinese-titles-20261116/verification.json、targeted.log；源码说明见 docs/plugins.md「Codex 会话标题」。
 
 - 卡片 #36 对应的旧 Codex 独立待答框清理。
   - 状态：待验证

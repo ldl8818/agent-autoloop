@@ -6,10 +6,24 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import codex from "../plugins/codex/agent.ts";
-import { renameThread } from "../plugins/codex/title.ts";
+import { renameThread, titleResult } from "../plugins/codex/title.ts";
+import { readMessage } from "../worker/contract.ts";
 import { setup } from "./helpers.ts";
 
 const home = setup("codex-title");
+
+test("private title metadata preserves business receipt semantics and rejects internal identifiers", () => {
+  const business = '修复完成：补抓等待已正确分类\n\n```agent-autoloop\n{"later":[{"in":"5m","note":"核实"}]}\n```';
+  const result = titleResult(business + "\n\n```autoloop-title\n网站补抓｜正确识别等待与失败\n```\n");
+  assert.equal(result.text, business);
+  assert.equal(result.title, "autoloop-网站补抓｜正确识别等待与失败");
+  assert.deepEqual(readMessage(result.text), readMessage(business));
+  assert.deepEqual(titleResult(business + "\n```autoloop-title\ndecision-129｜caipiao-development\n```"), {
+    text: business,
+    title: null,
+  });
+  assert.deepEqual(titleResult(business), { text: business, title: null });
+});
 
 test("a custom business program can be launched without Codex discoverable for metadata", () => {
   const result = spawnSync(
@@ -54,7 +68,7 @@ test("naming wraps both launch paths while cancellation retains the original sto
   assert.equal(JSON.parse(cancel[3]).turn.cancel, true);
 });
 
-test("native naming prefixes the resolved task title, reads it back, and is idempotent", async () => {
+test("native naming prefixes a Chinese module and goal, reads it back, and is idempotent", async () => {
   let name: string | null = null;
   const calls: { method: string; params: any }[] = [];
   const rpc = async (method: string, params: any) => {
@@ -62,19 +76,46 @@ test("native naming prefixes the resolved task title, reads it back, and is idem
     if (method === "thread/name/set") name = params.name;
     return { thread: { id: "owned", name } };
   };
-  await renameThread(rpc, "owned", "caipiao｜修复看板同步与补抓排队");
-  assert.equal(name, "autoloop-caipiao｜修复看板同步与补抓排队");
+  await renameThread(rpc, "owned", "网站补抓｜修复看板同步与补抓排队");
+  assert.equal(name, "autoloop-网站补抓｜修复看板同步与补抓排队");
   assert.deepEqual(
     calls.map((call) => call.method),
     ["thread/read", "thread/name/set", "thread/read"],
   );
   assert.ok(calls.every((call) => call.params.threadId === "owned"));
   calls.length = 0;
-  await renameThread(rpc, "owned", "caipiao｜接续原任务");
+  await renameThread(rpc, "owned", "网站补抓｜接续原任务");
   assert.deepEqual(
     calls.map((call) => call.method),
     ["thread/read"],
   );
+});
+
+test("internal rule and worktree IDs never become titles, and a semantic name repairs the old slug", async () => {
+  let name = "autoloop-decision-129｜caipiao-development-decision-129-decision-129";
+  const writes: string[] = [];
+  const rpc = async (method: string, params: any) => {
+    if (method === "thread/name/set") writes.push((name = params.name));
+    return { thread: { id: "owned", name } };
+  };
+  await renameThread(rpc, "owned", "autoloop-decision-129｜caipiao-development-decision-129-decision-129");
+  assert.deepEqual(writes, []);
+  await renameThread(rpc, "owned", "网站补抓｜正确识别等待与失败");
+  assert.equal(name, "autoloop-网站补抓｜正确识别等待与失败");
+  assert.equal(writes.length, 1);
+});
+
+test("empty native titles wait for semantic naming instead of copying an internal fallback", async () => {
+  const methods: string[] = [];
+  await renameThread(
+    async (method) => {
+      methods.push(method);
+      return { thread: { id: "owned", name: null } };
+    },
+    "owned",
+    "autoloop-decision-129｜caipiao-development-decision-129-decision-129",
+  );
+  assert.deepEqual(methods, ["thread/read"]);
 });
 
 test("an existing session keeps its title body when the origin prefix is added", async () => {

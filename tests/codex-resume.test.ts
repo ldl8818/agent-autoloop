@@ -49,6 +49,9 @@ test("the temporary daemon relay requires its capability before starting the off
 
 async function fixture(mode = "locked") {
   const calls: any[] = [];
+  const titled = mode.includes("title");
+  const titleBlock = "\n\n```autoloop-title\n网站补抓｜正确识别等待与失败\n```";
+  let titleName: string | null = null;
   let finish: (() => void) | undefined;
   let release = () => {};
   let savedTurn: any;
@@ -104,6 +107,15 @@ async function fixture(mode = "locked") {
         calls.push(message);
         const reply = (result: object) => send({ id: message.id, result });
         if (message.method === "initialize") reply({ userAgent: "test" });
+        if (message.method === "thread/read") reply({ thread: { id: "original", name: titleName } });
+        if (message.method === "thread/name/set") {
+          if (mode === "new-title-failure")
+            send({ id: message.id, error: { code: -1, message: "metadata unavailable" } });
+          else {
+            titleName = message.params.name;
+            reply({});
+          }
+        }
         if (message.method === "thread/resume" || message.method === "thread/start")
           reply({
             thread: {
@@ -132,9 +144,12 @@ async function fixture(mode = "locked") {
               { type: "userMessage", clientId: message.params.clientUserMessageId, content: message.params.input },
             ],
           };
-          if (mode === "drop-complete") {
+          if (mode === "drop-complete" || mode === "drop-title") {
             savedTurn.status = "completed";
-            savedTurn.items.push({ type: "agentMessage", text: "recovered completed result" });
+            savedTurn.items.push({
+              type: "agentMessage",
+              text: "recovered completed result" + (titled ? titleBlock : ""),
+            });
           }
           if (mode === "drop-message") savedTurn.items.push({ type: "agentMessage", text: "recovered final message" });
           finish = () => {
@@ -154,7 +169,10 @@ async function fixture(mode = "locked") {
                 turnId: savedTurn.id,
                 item: {
                   type: "agentMessage",
-                  text: mode === "business-failed" ? "没跑成：临时服务不可用" : "remembered context: iris-728; blue",
+                  text:
+                    mode === "business-failed"
+                      ? "没跑成：临时服务不可用"
+                      : "remembered context: iris-728; blue" + (titled ? titleBlock : ""),
                 },
               },
             });
@@ -221,6 +239,7 @@ if (process.argv[2] === "app-server") {
   );
   const argv = codex.command({
     prompt: "finish blue",
+    ...(titled && { title: "autoloop-decision-129｜caipiao-development-decision-129-decision-129" }),
     resume: mode.startsWith("new-") ? null : "original",
     session: "original",
     cwd: home,
@@ -389,6 +408,69 @@ test(
     }
   },
 );
+
+test("read-only tasks return a semantic title that the host names without adding a business turn", async () => {
+  const f = await fixture("new-title");
+  try {
+    const r = await f.done;
+    assert.equal(r.code, 0, r.err);
+    const submit = f.calls.find((x) => x.method === "turn/start");
+    assert.match(submit.params.input[0].text, /Codex会话分区\.md/);
+    assert.match(submit.params.input[0].text, /中文模块名｜持续目标/);
+    assert.equal(submit.params.sandboxPolicy.networkAccess, false);
+    const writes = () => f.calls.filter((x) => x.method === "thread/name/set");
+    assert.deepEqual(writes()[0].params, { threadId: "original", name: "autoloop-网站补抓｜正确识别等待与失败" });
+    assert.equal(f.calls.filter((x) => x.method === "thread/read").length, 3);
+    const replay = await f.again().done;
+    assert.equal(replay.code, 0, replay.err);
+    assert.equal(writes().length, 1);
+    assert.equal(f.calls.filter((x) => x.method === "thread/start").length, 1);
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+    assert.equal(codex.read(r.out, r.code, r.err).text, "remembered context: iris-728; blue");
+    assert.equal(codex.read(replay.out, replay.code, replay.err).text, "remembered context: iris-728; blue");
+    const saved = JSON.parse(readFileSync(f.receiptFile, "utf8"));
+    assert.equal(saved.text, "remembered context: iris-728; blue");
+    assert.equal(saved.title, "autoloop-网站补抓｜正确识别等待与失败");
+  } finally {
+    await f.close();
+  }
+});
+
+test("host naming failures retain the completed business receipt and never resubmit the task", async () => {
+  const f = await fixture("new-title-failure");
+  try {
+    const r = await f.done;
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /Codex 标题未同步/);
+    assert.equal(codex.read(r.out, r.code, r.err).text, "remembered context: iris-728; blue");
+    const replay = await f.again().done;
+    assert.equal(replay.code, 0, replay.err);
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a recovered completed result names the original session and strips private title metadata", async () => {
+  const f = await fixture("drop-title");
+  try {
+    const lost = await f.done;
+    assert.equal(lost.code, 0, lost.err);
+    assert.match(lost.err, /Codex 连接中断/);
+    assert.equal(codex.read(lost.out, lost.code, lost.err).text, "recovered completed result");
+    const recovered = await f.again().done;
+    assert.equal(recovered.code, 0, recovered.err);
+    assert.equal(codex.read(recovered.out, recovered.code, recovered.err).text, "recovered completed result");
+    assert.deepEqual(f.calls.find((x) => x.method === "thread/name/set").params, {
+      threadId: "original",
+      name: "autoloop-网站补抓｜正确识别等待与失败",
+    });
+    assert.equal(f.calls.filter((x) => x.method === "turn/start").length, 1);
+    assert.equal(f.calls.filter((x) => x.method === "thread/start").length, 0);
+  } finally {
+    await f.close();
+  }
+});
 
 test("Codex creates new tasks on the shared server with full access and replays a completed launch once", async () => {
   const f = await fixture("new-full");

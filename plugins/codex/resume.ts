@@ -6,7 +6,7 @@ import { HOME } from "../../host/home.ts";
 import type { Turn } from "../../worker/agents.ts";
 import { readMessage } from "../../worker/contract.ts";
 import { connection } from "./connection.ts";
-import { renameThread } from "./title.ts";
+import { nameSession, namingPrompt, renameThread, titleResult } from "./title.ts";
 import { resultText } from "./agent.ts";
 
 const { turn, program } = JSON.parse(process.argv[2]) as { turn: Turn; program: string };
@@ -34,6 +34,7 @@ type Receipt = {
   turnId?: string;
   status?: string;
   text?: string;
+  title?: string | null;
   usage?: object;
   attempt?: number;
   continuation?: number;
@@ -196,7 +197,7 @@ async function shared() {
     if (message.method === "item/completed" && p.item?.type === "agentMessage") {
       liveMessage = true;
       text = p.item.text;
-      emit({ type: "item.completed", item: { type: "agent_message", text: p.item.text } });
+      emit({ type: "item.completed", item: { type: "agent_message", text: titleResult(p.item.text).text } });
     }
     if (message.method === "thread/tokenUsage/updated" && p.tokenUsage?.total) {
       const u = p.tokenUsage.total;
@@ -270,9 +271,11 @@ async function shared() {
     }
     emit({ type: "autoloop.resume", thread_id: threadId });
     if (turn.title && !turn.cancel) {
-      await renameThread(rpc, threadId, turn.title).catch((error) =>
-        console.error(`Codex 标题未同步：${error.message}`),
-      );
+      const named = await renameThread(rpc, threadId, turn.title).catch((error) => {
+        console.error(`Codex 标题未同步：${error.message}`);
+        return false;
+      });
+      if (!named) turn.prompt += namingPrompt();
     }
     if (resumed.thread.id !== threadId) throw new Error("Codex 返回了不同的会话，拒绝继续。");
     let recovered: any;
@@ -296,13 +299,18 @@ async function shared() {
       own = recovered.id;
       if (!liveMessage)
         text = recovered.items?.filter((item: any) => item.type === "agentMessage").at(-1)?.text ?? text;
-      save({ turnId: own, text });
-      if (text) emit({ type: "item.completed", item: { type: "agent_message", text } });
+      const result = titleResult(text);
+      save({ turnId: own, text: result.text, title: result.title });
+      if (text) emit({ type: "item.completed", item: { type: "agent_message", text: result.text } });
       if (recovered.status !== "inProgress") {
-        save({ status: recovered.status, text, usage });
+        save({ status: recovered.status, text: result.text, title: result.title, usage });
         external(false);
         if (recovered.status !== "completed")
           throw new Error(recovered.error?.message || `Codex 本轮没有完成：${recovered.status}`);
+        if (result.title && !turn.cancel)
+          await renameThread(rpc, threadId, result.title).catch((error) =>
+            console.error(`Codex 标题未同步：${error.message}`),
+          );
         if (!continueCompleted()) {
           deliver();
           return;
@@ -361,9 +369,14 @@ async function shared() {
     for (const message of buffered) notification(message);
     if (stopping) interrupt();
     const result = await completed;
-    save({ status: result.status, text, usage });
+    const named = titleResult(text);
+    save({ status: result.status, text: named.text, title: named.title, usage });
     external(false);
     if (result.status !== "completed") throw new Error(result.error?.message || `Codex 本轮没有完成：${result.status}`);
+    if (named.title && !turn.cancel)
+      await renameThread(rpc, threadId, named.title).catch((error) =>
+        console.error(`Codex 标题未同步：${error.message}`),
+      );
     emit({ type: "turn.completed", ...(usage && { usage }) });
     // The business result is final. Losing the cleanup response must not turn it into a retry.
     await rpc("thread/unsubscribe", { threadId: threadId }).catch(() => {});
@@ -378,7 +391,13 @@ async function shared() {
 
 async function run() {
   if (receipt?.status === "completed") {
-    if (!continueCompleted()) return deliver();
+    if (!continueCompleted()) {
+      if (receipt.title && !turn.cancel)
+        await nameSession(program, threadId, receipt.title).catch((error) =>
+          console.error(`Codex 标题未同步：${error.message}`),
+        );
+      return deliver();
+    }
   }
   if (turn.cancel && receipt?.status) {
     external(false);
