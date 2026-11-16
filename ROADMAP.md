@@ -8,6 +8,13 @@
 
 ## 未完成任务
 
+- Codex 会话来源标题随首次执行 App-Server 改造统一加载。
+  - 状态：待验证
+  - 接续条件：命名源码已提交749c9c0，本轮按主人要求只提交、合并，不部署；正式服务尚未加载。后续任务将 autoloop 的 Codex 首次执行改为 App-Server 模式，须保留 autoloop-事项｜目标、幂等命名和命名失败不影响业务的行为。
+  - 下一步：由后续 App-Server 改造任务统一部署，再从自然派单读回原生标题；不重跑历史业务，不批量修改历史会话。
+  - 分支／worktree：main；/Users/dylan/projects/agent-autoloop。当前命名任务的 feature/autoloop-session-title 工作区仍被本聊天占用，提交与合并后保留，待会话迁回且交付条件满足后清理。
+  - 证据位置：tests/codex-title.test.ts；plugins/codex/title.ts；docs/plugins.md 的「Codex 会话标题」。
+
 - 卡片 #36 对应的旧 Codex 独立待答框清理。
   - 状态：待验证
   - 接续条件：中台卡片早已 done；旧框来自本聊天另建的 request_user_input_async，与中台卡片没有生命周期绑定。当前工具没有正式取消接口，不能据中台完成声称旧框已清除。
@@ -22,6 +29,8 @@
   - 证据位置：~/.agent-autoloop/evidence/feishu-heading-20261114/activation.json、verification.json；原版切换记录见 feishu-upstream-20261114；展示约定见 docs/protocol.md。
 
 ## 最近完成
+
+- 2026-11-16 16:03，北京时间：Mac Mini 完成本批 Codex 来源标题源码与隔离验证，提交749c9c0；按主人指令仅提交并合入本地 main，不推送、不部署。标题统一为 autoloop-事项｜目标，保留原标题正文，命名走原生读写接口，取消控制跳过命名，命名失败保留业务结果。独立 Codex 审查发现的自定义 program 构造期查找问题已先失败后通过验证并修复，复审无剩余必须修问题。825项快速测试通过、22项平台跳过，31项定向检查、类型、格式与差异检查通过；临时 CODEX_HOME、独立 Unix socket 的真实 Codex App-Server 与官方 proxy 下，完整命名包装器运行两次，原生标题同为 autoloop-caipiao｜原会话接续，业务只用本地夹具、未提交模型轮次，临时进程和材料已清理。合并保留 main 最新的本地 Fork 维护规则与既有接力结论，源代码与已验证提交一致。正式加载和自然派单验收交后续首次执行 App-Server 改造统一处理，MacBook Air 未操作。
 
 - 2026-11-16 15:27，北京时间：按主人要求，将 macOS 本地 Fork 维护规则写入 AGENTS.md，明确优先于上游通用验证与收尾门禁：常规同步以 macOS 快速检查和受影响定制为主，升级核对实际运行，不默认长模拟或跨平台全测；本地修改或手工合并改变核心行为、或发现相关风险时再选对应深度检查。上游核心目录变化本身不自动触发本地全测，等价证据复用，包装脚本须核对实际检查范围。两份 README 与 INSTALL 只链接唯一规则正文，上游开发、跨平台交付和正式发版范围保留。仅改5份项目文档，未修改测试、CI、现役服务或全局规则；主人后续授权本批文档提交并 push，远端结果以 Git 回执为准。
 

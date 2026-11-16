@@ -26,7 +26,7 @@ import { commandLine, processCommand } from "../host/command.ts";
 import type { Job } from "../protocol/job.ts";
 import { addUsage, type Notice, type Result } from "../protocol/validate.ts";
 import { adapterFor, type Adapter, type Reading, type Turn, type Usage } from "./agents.ts";
-import { promptFor, readMessage, repairPrompt, resultFrom } from "./contract.ts";
+import { promptFor, readMessage, repairPrompt, resultFrom, titleOf } from "./contract.ts";
 import { loadUsage, saveUsage, usageDelta } from "./usage.ts";
 
 const RUNS = path.join(HOME, "worker", "runs");
@@ -233,8 +233,10 @@ export function createWorker({
     save(entry);
     const { rule, agent } = entry.job;
     const cwd = rule.cwd.replace(/^~(?=[/\\])/, homedir());
+    const label = titleOf(entry.job)[0] ?? rule.name;
     const turn: Turn = {
       prompt,
+      title: /[|｜]/.test(label) ? label : `${path.basename(cwd)}｜${label}`,
       session: entry.session,
       resume: cancelling ? entry.session : entry.resume,
       cwd,

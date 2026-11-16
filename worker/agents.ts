@@ -13,6 +13,8 @@ export type Access = "read" | "edit" | "full";
 /** One launch of an agent. `resume` is the session to go on in, if any; otherwise `session` is a new id it may use. */
 export type Turn = {
   prompt: string;
+  /** Trusted display title resolved from this run's rule; adapters may ignore it. */
+  title?: string;
   session: string;
   resume: string | null;
   cwd: string;

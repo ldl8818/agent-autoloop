@@ -45,7 +45,7 @@ const adapter: Adapter = {
         "沿用该入口的会话，只交网页步骤，业务处理和中台回执仍由本轮负责；没有可用入口或需要本人恢复连接时，按待你处理的约定交回。\n\n" +
         turn.prompt,
     ];
-    return turn.resume
+    const command = turn.resume
       ? [
           stablePath(process.execPath),
           "--disable-warning=ExperimentalWarning",
@@ -53,6 +53,18 @@ const adapter: Adapter = {
           JSON.stringify({ turn, argv, shared: process.platform !== "win32" }),
         ]
       : argv;
+    return turn.title && !turn.cancel
+      ? [
+          stablePath(process.execPath),
+          "--disable-warning=ExperimentalWarning",
+          join(import.meta.dirname, "title.ts"),
+          JSON.stringify({
+            argv: command,
+            cwd: turn.cwd,
+            title: turn.title,
+          }),
+        ]
+      : command;
   },
   cancel: (turn) => adapter.command({ ...turn, resume: turn.resume ?? turn.session, cancel: true }),
   read(stdout, code, stderr) {

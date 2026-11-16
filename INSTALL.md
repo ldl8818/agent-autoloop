@@ -77,6 +77,8 @@ PATH 没有命令时，把 `agent-autoloop` 换成安装器打印的完整路径
 
 Codex 报 `active writer` 时，不要删除锁文件或以新会话完成当作续接通过；按[原会话续接](docs/plugins.md#codex-原会话续接)核对同一会话、上下文和回答去重。
 
+Codex 任务的原生标题可用于识别后台派单；更新后的处理时机与失败提示见[会话命名](docs/plugins.md#codex-会话标题)。
+
 ## 验证
 
 先查看安装和连接情况，再用真实 Agent 跑完整问答：

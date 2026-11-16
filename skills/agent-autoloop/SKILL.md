@@ -73,6 +73,8 @@ Codex 的桌面会话占用与忙碌后的自动接续见[原会话续接](../..
 
 `access` 默认 `edit`，专用插件翻译成对应 CLI 的权限；`command` 只传参数，不替任意程序限制权限，按该 CLI 文档配置。要完整权限、不审批的话写 `full`，先和用户说清楚。
 
+Codex 派单会话的来源标题见 `docs/plugins.md` 的「Codex 会话标题」；原生接口不可用不重跑业务。
+
 内置的 Claude Code、Codex、DeepSeek Harness 要走第三方网关、代理，或者启动前要先设好环境变量：写一个小脚本，设好变量再 `exec claude "$@"`（Codex、DSH 照此换成 `codex`、`dsh`），Agent 里写 `"program": "脚本的绝对路径"`。插件照旧解析输出、续接会话、统计用量，只是启动的是这个脚本；不用改成 `use: "command"`。令牌放在脚本读的文件里，不写进 `rules.json`。接单程序启动 Agent 前会去掉继承来的 `CLAUDE_CODE_*` 变量，要用的写在脚本里。`agent-autoloop doctor` 也用这个脚本检查登录。脚本能读到 `AGENT_AUTOLOOP_RUN`（第几轮）和 `AGENT_AUTOLOOP_CONTEXT`（资料文件），比如按轮次准备工作目录再 `cd` 进去。
 
 ```json

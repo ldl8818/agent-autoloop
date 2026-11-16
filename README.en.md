@@ -14,6 +14,8 @@ This local fork's `main` uses the original task flow and upstream Feishu present
 
 For local sync and upgrade verification, follow the [local fork maintenance rules](AGENTS.md#本地-fork-维护).
 
+Codex background tasks use native session titles in the form `autoloop-topic｜goal`; see [session naming](docs/plugins.md#codex-会话标题).
+
 ## What problem does it solve?
 
 Most of us use command-line agents like Claude Code or Codex by babysitting a terminal: you type a prompt, watch it run, and answer its questions. Close the window or walk away, and the work stops.
