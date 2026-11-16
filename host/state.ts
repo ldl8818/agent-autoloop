@@ -23,6 +23,7 @@ const VIEWS = {
   seen: "kind name seen_at",
   keys: "kind name hash created_at",
   pauses: "name by reason since until",
+  completed: "rule lane reason by at state",
 };
 
 /** Made anew at every start, so changing them takes no rebuild and no migration. */
@@ -197,6 +198,7 @@ export function stateOf(now: number, before: number | undefined, rules: Rules, {
       skippedAt: eventRule(rule) ? null : (skippedAt.get(rule.name) ?? null),
     })),
     pauses,
+    completed: all<Row>("SELECT rule, lane, reason, by, at FROM completed WHERE state = 'done' ORDER BY rule, lane"),
     skipped: all<Row>(SKIPPED).map(skippedView),
     elsewhere: rules.elsewhere.map(({ name, source, to, cron, where, model, effort }) => {
       const next = iso(nextRun(parseCron(cron)!, now, rules.timezone) ?? now);

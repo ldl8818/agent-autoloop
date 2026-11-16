@@ -110,6 +110,8 @@ Agent 结束了这一轮，问了你一个问题。它现在不占进程、不�
 
 `agent-autoloop pause <规则>`、`resume <规则>` 暂停和恢复一条规则，暂停期间到点不跑、来事件不接也不排队，恢复后不自动补跑；恢复时会列出暂停期间跳过的事件，照着给出的 `agent-autoloop replay <规则> --since <时间>` 一次补跑，每条只补一次。`agent-autoloop run <规则>` 立即跑一轮。这些记在中台的日志里，不改 `rules.json`。`agent-autoloop runs [规则]` 列出做完的轮次，`--before <第几轮>` 往前翻，拿到编号再用 `agent-autoloop why <第几轮>` 看来龙去脉。
 
+一次性交付由可信控制器核实后，用 `agent-autoloop complete <规则> --reason 完成依据` 登记事项完成；写了 `parallel` 时同时指定 `--subject 对象`。中台统一取消旧复查、撤下未领取轮次并拦截后续派发，普通恢复暂停不会重开事项。持续业务的单轮成功不自动关闭事项。新工作明确 `reopen` 后接续，详见[事项完成与重新打开](docs/protocol.md#事项完成与重新打开)。
+
 保存后几秒内自动生效，可以运行 `agent-autoloop check` 检查，`agent-autoloop check <文件>` 检查一份草稿，不碰正在跑的中台；`agent-autoloop rules explain [文件]` 看生效的规则和下次定时（也可以指定一份草稿），`agent-autoloop emit <类型> --dry-run` 预演一条事件会派给谁（不连接中台、不写日志）。就算改错了，或者文件被删、读不到，系统也会继续按旧规则跑，并发卡片提醒你。
 
 ### 每日运行摘要

@@ -52,6 +52,8 @@ const HELP = `Agent 自动化中台
   agent-autoloop pause <规则> [--reason 原因] [--until 时间]
                                     暂停一条规则：到点不跑、来事件不接也不排队，直到恢复
   agent-autoloop resume <规则>
+  agent-autoloop complete <规则> [--subject 对象] --reason 已核实的完成依据
+  agent-autoloop reopen <规则> [--subject 对象] --reason 重新打开的原因
                                     恢复，列出暂停期间跳过的事件；错过的时段不补跑
   agent-autoloop replay <规则> --since <时间>
                                     补跑这条规则从这个时间起暂停时跳过的事件，每条只补一次
@@ -159,6 +161,14 @@ rules.json 里这个定时任务要写 cwd；你答了，中台叫醒它的 Agen
   resolve: { flags: [], usage: "用法：agent-autoloop resolve <卡片> <结果>" },
   restore: { flags: ["yes"], usage: RESTORE_USAGE },
   resume: { flags: [], usage: "用法：agent-autoloop resume <规则>" },
+  complete: {
+    flags: ["subject", "reason"],
+    usage: "用法：agent-autoloop complete <规则> [--subject 对象] --reason 完成依据",
+  },
+  reopen: {
+    flags: ["subject", "reason"],
+    usage: "用法：agent-autoloop reopen <规则> [--subject 对象] --reason 重新打开原因",
+  },
   replay: {
     flags: ["since"],
     usage: "用法：agent-autoloop replay <规则> --since <时间>（恢复时打印的就是这条命令）",
@@ -574,6 +584,19 @@ async function resume(args: string[]) {
   console.log(lines.join("\n"));
 }
 
+async function taskControl(action: "complete" | "reopen", args: string[]) {
+  const { named, rest } = flags(args);
+  const reason = text(named.reason);
+  if (!rest[0] || !reason) return fail(TAKES[action].usage);
+  const subject = text(named.subject);
+  const done = await ownerClient()[action](rest[0], { reason, ...(subject && { subject }) });
+  console.log(
+    action === "complete"
+      ? `事项已完成，旧事件和复查不再启动执行：${rest[0]}`
+      : `${done.changed ? "已重新打开" : "未处于完成状态"}：${rest[0]}；旧事件不补跑。`,
+  );
+}
+
 async function replay(args: string[]) {
   const { named, rest } = flags(args);
   const since = text(named.since);
@@ -936,6 +959,8 @@ const commands: Record<string, () => unknown> = {
   rules: () => rulesCommand(args),
   pause: () => pause(args),
   resume: () => resume(args),
+  complete: () => taskControl("complete", args),
+  reopen: () => taskControl("reopen", args),
   replay: () => replay(args),
   run: () => runNow(args),
   key: () => key(args),
