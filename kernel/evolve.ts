@@ -14,7 +14,6 @@ export const TABLES = [
   "config",
   "due",
   "pauses",
-  "completed", // Read compatibility for facts written by the retired task-completion extension.
 ] as const;
 export type Table = (typeof TABLES)[number];
 export type Change = { table: Table; key: string; row: Row | null };
@@ -184,7 +183,6 @@ export function keyOf(table: Table, row: Row): string {
   if (table === "seen" || table === "keys") return `${row.kind}:${row.name}`;
   if (table === "due") return `${row.kind}:${row.key}`;
   if (table === "pauses") return row.name;
-  if (table === "completed") return JSON.stringify([row.rule, row.lane]);
   return "rules";
 }
 export function empty(db = new DatabaseSync(":memory:")) {

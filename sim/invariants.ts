@@ -20,7 +20,6 @@ export function replay(log: Fact[]): Snapshot {
       "config",
       "due",
       "pauses",
-      "completed",
     ].map((t) => [t, {}]),
   ) as Snapshot["tables"];
   const next: Record<string, number> = {};
@@ -58,9 +57,7 @@ export function invariants(current: View, log: Fact[], before?: Snapshot) {
     );
   for (const e of events)
     // A rule paused when the event came is on record as having matched it, and took nothing.
-    for (const rule of JSON.parse(e.routed).filter(
-      (r: string) => !JSON.parse(e.paused ?? "[]").includes(r) && !JSON.parse(e.completed ?? "[]").includes(r),
-    ))
+    for (const rule of JSON.parse(e.routed).filter((r: string) => !JSON.parse(e.paused ?? "[]").includes(r)))
       assert.ok(
         links.some((l) => l.event_id === e.id && view.tables.runs[l.run_id]?.rule === rule),
         "已收事件丢了派发关系",
@@ -90,11 +87,7 @@ export function invariants(current: View, log: Fact[], before?: Snapshot) {
         assert.equal(now.answer, c.answer);
       }
     for (const r of rows(before, "runs"))
-      if (r.task_completed_at && r.state === "cancelled" && r.issued !== null) {
-        const now = view.tables.runs[r.id];
-        assert.ok(["done", "nothing", "cancelled"].includes(now.state), "完成事项的迟到回执重建了执行");
-        assert.equal(now.task_completed_at, r.task_completed_at);
-      } else if (["done", "nothing", "cancelled"].includes(r.state))
+      if (["done", "nothing", "cancelled"].includes(r.state))
         assert.deepEqual(view.tables.runs[r.id], r, "完成的回执再次生效");
   }
   if (log.length) assert.deepEqual(view.tables.due, deadlines(current, log.at(-1)!.at), "到期表和重算的不一样");

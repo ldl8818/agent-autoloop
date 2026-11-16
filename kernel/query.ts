@@ -45,12 +45,7 @@ export function sourceOf(view: View, runId: number) {
 /** The rules an event went to, and the ones that would have taken it but were paused. */
 export function routingOf(event: Row) {
   const paused: string[] = JSON.parse(event.paused ?? "[]");
-  // Historical completion-extension events still need their original routing acknowledgment.
-  const completed: string[] = JSON.parse(event.completed ?? "[]");
-  return {
-    routed: JSON.parse(event.routed).filter((name: string) => !paused.includes(name) && !completed.includes(name)),
-    paused,
-  };
+  return { routed: JSON.parse(event.routed).filter((name: string) => !paused.includes(name)), paused };
 }
 
 /**
