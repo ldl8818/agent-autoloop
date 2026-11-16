@@ -2,6 +2,7 @@
 // print "没有这个地址", which reads like a broken hub rather than a mistyped command. Found here by running the real program in a home nothing is installed into: the usage must come before any hub is asked.
 // A hub that doesn't answer was said as a bare "fetch failed", with no word of which hub or what to do.
 // A sandbox refusing a connection must not be diagnosed as a stopped hub or recommend reinstalling its service.
+// The preload must be a file URL: Windows drive paths are parsed as unsupported URL schemes by --import.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
@@ -12,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
 const program = join(import.meta.dirname, "..", "bin", "agent-autoloop.ts");
 const dir = mkdtempSync(join(tmpdir(), "agent-autoloop-cli-run-id-"));
@@ -21,7 +23,12 @@ async function run(args: string[], home = join(dir, "home"), preload?: string) {
   try {
     const { stdout, stderr } = await promisify(execFile)(
       process.execPath,
-      ["--disable-warning=ExperimentalWarning", ...(preload ? ["--import", preload] : []), program, ...args],
+      [
+        "--disable-warning=ExperimentalWarning",
+        ...(preload ? ["--import", pathToFileURL(preload).href] : []),
+        program,
+        ...args,
+      ],
       { env: { ...process.env, AGENT_AUTOLOOP_HOME: home } },
     );
     return { code: 0, stdout, stderr };

@@ -1,11 +1,12 @@
 // A Desktop-loaded thread must resume through its owning server, retaining its identity and history.
 // A failed resume must not authorize a fresh session; work already started must never be submitted again.
+// Windows needs the same npm-style executable shim as an installed CLI; it cannot spawn a shebang script directly.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Duplex } from "node:stream";
 import { test } from "node:test";
 import { commandLine } from "../host/command.ts";
@@ -15,6 +16,13 @@ import { setup } from "./helpers.ts";
 
 const home = setup("codex-resume");
 
+function executable(script: string) {
+  if (process.platform !== "win32") return script;
+  const shim = script.replace(/\.cjs$/, ".cmd");
+  writeFileSync(shim, `@ECHO off\r\nnode "%~dp0${basename(script)}" %*\r\n`);
+  return shim;
+}
+
 test("the temporary daemon relay requires its capability before starting the official proxy", async () => {
   const marker = join(home, "proxy-started");
   const program = join(home, "proxy-guard.cjs");
@@ -23,7 +31,7 @@ test("the temporary daemon relay requires its capability before starting the off
     `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)},'started');\n`,
     { mode: 0o755 },
   );
-  const relay = await connection(program);
+  const relay = await connection(executable(program));
   const rejected = (url: string) =>
     new Promise<void>((resolve) => {
       const ws = new WebSocket(url);
@@ -212,7 +220,7 @@ if (process.argv[2] === "app-server") {
     tier: "priority",
     contextFile: join(home, "context.json"),
     folder: home,
-    program,
+    program: executable(program),
     requestId: mode,
   });
   const [command, args] = commandLine(argv);
