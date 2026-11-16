@@ -23,7 +23,7 @@
 
 ## 最近完成
 
-- 2026-11-16 14:07，北京时间：按主人要求撤下 Solo to Team 维护流程，接入版源码与原接力记录完整保存在本地 feature/solo-to-team-integration（002d150）。main 的源码提交9970e7e移除维护插件、专属测试及现行文档入口，默认恢复上游飞书展示，保留标题／编号、Codex 续接和卡片更正。Mac Mini 已切换到9970e7e，12条集成规则与8个岗位退出，保留26条规则和17个 Agent；caipiao 恢复接收失败事件，proxy 恢复原受控运维路径，两者均与项目生成器核对。18张旧维护卡通过本人入口关闭，34份既有投递更新原消息，原业务问题未标成解决。原私有项目片段停放在 ~/.agent-autoloop/disabled-integrations/solo-to-team/，原60214条事实前缀、11份保护文件、其他102张卡片及保留规则的暂停状态通过；三执行池、双通道均取得启动后新心跳，doctor 退出0。旧程序、覆盖插件和本任务临时材料已核实归属后清理。原融合每日检查的 macOS 待验记录随集成版留在保留分支，不再作为 main 待办。本地提交未推送，未发版，未创建恢复点、发测试消息或重跑正式业务，MacBook Air 未操作。证据：~/.agent-autoloop/evidence/solo-to-team-withdrawal-20261116/。
+- 2026-11-16 14:07，北京时间：按主人要求撤下 Solo to Team 维护流程，接入版源码与原接力记录完整保存在本地 feature/solo-to-team-integration（002d150）。main 的源码提交9970e7e移除维护插件、专属测试及现行文档入口，默认恢复上游飞书展示，保留标题／编号、Codex 续接和卡片更正。Mac Mini 已切换到9970e7e，12条集成规则与8个岗位退出，保留26条规则和17个 Agent；caipiao 恢复接收失败事件，proxy 恢复原受控运维路径，两者均与项目生成器核对。18张旧维护卡通过本人入口关闭，34份既有投递更新原消息，原业务问题未标成解决。原私有项目片段停放在 ~/.agent-autoloop/disabled-integrations/solo-to-team/，原60214条事实前缀、11份保护文件、其他102张卡片及保留规则的暂停状态通过；三执行池、双通道均取得启动后新心跳，doctor 退出0。旧程序、覆盖插件和本任务临时材料已核实归属后清理。原融合每日检查的 macOS 待验记录随集成版留在保留分支，不再作为 main 待办。云仓交付使用 main 和 feature/solo-to-team-integration 两条分支；未发版，未创建恢复点、发测试消息或重跑正式业务，MacBook Air 未操作。证据：~/.agent-autoloop/evidence/solo-to-team-withdrawal-20261116/。
 
 - 2026-11-15 22:52，北京时间：Mac Mini 完成本次临时合并工作区清理。会话通过原生迁移切回原目录后，旧工作区由 archive_worktree 归档，list_artifacts 读回 archived_worktree，归档标识为 01a1dfaf-de3f-7212-bc94-5ae929db2dfe；原生恢复键为 /Users/dylan/.codex/worktrees/autoloop-upstream-20261113/agent-autoloop。已核实旧目录及 Git 注册消失，临时分支 codex/upstream-sync-20261113 的全部提交已包含于 main 且未被其他工作区使用，随后普通删除并确认分支不存在。原目录保持 main、6a72220、工作树干净；本次仅同步此清理记录，未操作其他会话或正式安装，未提交推送。原清理待办已移出未完成任务。
 
