@@ -18,6 +18,8 @@ export type Card = {
   result: string | null;
   link: string | null;
   rule?: string;
+  /** Display-only directory name from the trusted rule's working directory. */
+  project?: string;
   /** Display-only name for an automatic notice whose stored title is its rule identifier. */
   taskTitle?: string;
 };

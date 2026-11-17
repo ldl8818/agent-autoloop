@@ -58,7 +58,7 @@ test("feishu: upstream cards use project headings but retain full text and visib
     text: { tag: "plain_text", content: "卡片 #5" },
   });
   const done = render({ ...input, state: "done", choice: 0, result: "删了" }, {}, "upstream");
-  assert.equal(done.header.title.content, "shop-check｜要不要删｜已执行");
+  assert.equal(done.header.title.content, "中台｜要不要删｜已执行");
   assert.ok(!done.body.elements.some((e) => e.tag === "form" || e.tag === "interactive_container"));
   assert.match(JSON.stringify(done), /已执行：删了/);
   assert.deepEqual(done.body.elements.at(-1), card.body.elements.at(-1));
@@ -77,7 +77,7 @@ test("feishu: project labels come from configured rule prefixes without changing
     const form = card.body.elements.find((e) => e.tag === "form") as any;
     assert.equal(form.elements[1].name, `ask_text_submit_${id}`);
   }
-  assert.match(render({ ...base, rule: "new-project-task" }).header.title.content, /^new-project-task｜/);
+  assert.match(render({ ...base, rule: "new-project-task" }).header.title.content, /^中台｜/);
   assert.match(
     render({ ...base, kind: "notice", title: "店铺业务回执", rule: undefined }, { 店铺业务回执: "店铺" }).header.title
       .content,

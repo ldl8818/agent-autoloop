@@ -572,8 +572,12 @@ function nextCard(draft: Draft, channel: string) {
     }
     const attempt = { tries: delivery.tries + 1, first_try_at: firstTry ?? draft.at, not_before: iso(now + MINUTE) };
     put(draft, "deliveries", key, { card_id: card.id, channel, ...attempt });
-    const shown = cardView(card, draft.env, delivery.ref, draft.rules.channels[channel]?.links === true);
     const rule = card.rule ? ruleNamed(draft, card.rule) : undefined;
+    const project = rule?.cwd.split(/[\\/]/u).filter(Boolean).at(-1);
+    const shown = {
+      ...cardView(card, draft.env, delivery.ref, draft.rules.channels[channel]?.links === true),
+      ...(project ? { project } : {}),
+    };
     // Display metadata must not rewrite a historical card or its answer identity.
     if (card.kind === "notice" && card.title === card.rule && rule?.title) {
       return {
