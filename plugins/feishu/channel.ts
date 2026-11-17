@@ -33,7 +33,7 @@ function projectName(card: Card, projects: Record<string, string>) {
   const match = Object.entries(projects)
     .filter(([prefix, name]) => prefix && typeof name === "string" && name.trim() && origin.startsWith(prefix))
     .sort(([a], [b]) => b.length - a.length)[0];
-  return match?.[1].trim() || card.rule || "中台";
+  return match?.[1].trim() || card.project || "中台";
 }
 
 /** Translate display labels only; retain the original rule for routing and old card callbacks. */

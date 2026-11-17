@@ -1,4 +1,4 @@
-// Automatic progress cards must display the task name while retaining stored identity and callbacks.
+// Automatic progress cards must display the task and trusted project, retaining stored identity and callbacks.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ for (const [template, expected] of [
   test("progress metadata preserves card identity and placeholder semantics: " + template, () => {
     const input = JSON.parse(readFileSync(new URL("./rules.fixture.json", import.meta.url), "utf8"));
     input.rules = [{ ...input.rules[0], parallel: undefined, title: template, tell: "always" }];
+    input.rules[0].cwd = "/workspace/projects/skills/";
     let view = empty();
     let now = Date.UTC(2026, 10, 16);
     const env = { secret: "test", publicUrl: "https://hub.test" };
@@ -29,6 +30,7 @@ for (const [template, expected] of [
     const stored = structuredClone(rows(view, "cards")[0]);
     const card = act("nextCard", "chat");
     assert.equal(card.taskTitle, expected);
+    assert.equal(card.project, "skills");
     assert.equal(card.id, stored.id);
     assert.equal(card.version, stored.version);
     assert.equal(card.rule, stored.rule);
@@ -82,4 +84,69 @@ test("both card styles replace an internal progress title, preserving Chinese ti
       assert.ok(JSON.stringify(ask).includes(fullTitle), "explicit long titles must remain readable in full");
     }
   }
+});
+
+test("both headings use a trusted directory instead of repeating a rule as the project", () => {
+  const base = {
+    id: 136,
+    version: 1,
+    ref: "original-message",
+    kind: "notice" as const,
+    state: "open" as const,
+    title: "Codex 双端问答",
+    rule: "Codex 双端问答",
+    project: "agent-autoloop",
+    text: "原生回答同步未完成；保留原卡和原会话。",
+    options: [],
+    recommend: null,
+    choice: null,
+    answer: null,
+    result: null,
+    link: null,
+  };
+  for (const style of ["upstream", "custom"] as const) {
+    const original = structuredClone(base);
+    const card = render(base, {}, style);
+    assert.equal(card.header.title.content, "agent-autoloop｜Codex 双端问答｜待处理");
+    assert.deepEqual(base, original);
+    assert.ok(JSON.stringify(card).includes(base.text));
+    const mapped = render(
+      { ...base, rule: "caipiao-development", project: "task-worktree" },
+      { "caipiao-": "caipiao" },
+      style,
+    );
+    assert.equal(mapped.header.title.content, "caipiao｜Codex 双端问答｜待处理");
+    const unknown = render({ ...base, project: undefined }, {}, style);
+    assert.equal(unknown.header.title.content, "中台｜Codex 双端问答｜待处理");
+  }
+});
+
+test("external questions carry the trusted Windows directory, ignoring project names in the question", () => {
+  const input = JSON.parse(readFileSync(new URL("./rules.fixture.json", import.meta.url), "utf8"));
+  input.elsewhere = [
+    {
+      name: "双端问答",
+      source: "app",
+      to: "a1",
+      cron: "0 0 * * *",
+      where: "外部",
+      cwd: "C:\\projects\\proxy\\",
+      prompt: "接续原问题。",
+    },
+  ];
+  let view = empty();
+  const env = { secret: "test", publicUrl: "https://hub.test" };
+  const act = (type: string, ...args: any[]) => {
+    const result = decide(view, { type, args }, Date.UTC(2026, 10, 17), env);
+    view = evolve(view, result.facts);
+    return result.value;
+  };
+  act("rules", parseRules(JSON.stringify(input), 0, "UTC"));
+  act("ask", "双端问答", { key: "original", title: "是否继续？", text: "项目：另一个项目", options: ["继续"] });
+  const stored = structuredClone(rows(view, "cards")[0]);
+  const card = act("nextCard", "chat");
+  assert.equal(card.project, "proxy");
+  assert.equal(card.title, "是否继续？");
+  assert.equal(card.id, stored.id);
+  assert.deepEqual(rows(view, "cards")[0], stored);
 });
