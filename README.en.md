@@ -262,6 +262,7 @@ For automated workloads, providers generally recommend using API keys rather tha
 ## Documentation
 
 - [Installation guide](INSTALL.md)
+- [Local fork customizations and maintenance (Chinese)](docs/本地定制与维护.md)
 - [Configuration & delivery pipeline manual](skills/agent-autoloop/SKILL.md)
 - [Writing plugins](docs/plugins.md)
 - [Full HTTP protocol specification](docs/protocol.md)
