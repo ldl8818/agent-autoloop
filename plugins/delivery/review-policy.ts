@@ -75,7 +75,7 @@ export function selectReview(
   return reviewer ? [{ name: "codex", ...reviewer }] : [];
 }
 
-const DEFAULT_MODEL = "gpt-6.1-sol";
+const DEFAULT_MODEL = "gpt-6.2-sol";
 const commandPlan = (command: string[]) =>
   `command/${createHash("sha256").update(JSON.stringify(command)).digest("hex")}`;
 

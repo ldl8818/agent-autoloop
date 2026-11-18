@@ -7,7 +7,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { powershell, psQuote } from "../host/command.ts";
+import { POWERSHELL, powershell, psQuote } from "../host/command.ts";
 
 /** Titles of the terminal windows on the signed-in desktop. Only a task in that session can see them. */
 function terminalWindows(scratch: string) {
@@ -47,7 +47,7 @@ Move-Item -Force "$Output.tmp" $Output
   const name = `agent-autoloop-test-windows-${process.pid}`;
   powershell(`
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${psQuote(`-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${probe}" "${output}"`)}
+    $action = New-ScheduledTaskAction -Execute ${psQuote(POWERSHELL)} -Argument ${psQuote(`-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${probe}" "${output}"`)}
     Register-ScheduledTask -TaskName ${psQuote(name)} -Action $action -Principal (New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited) -Force | Out-Null
     Start-ScheduledTask -TaskName ${psQuote(name)}
     $end = (Get-Date).AddSeconds(30)

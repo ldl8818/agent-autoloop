@@ -44,7 +44,7 @@
 ```jsonc
 {
   "timezone": "Asia/Shanghai", // 定时和“今天”用的时区，默认系统时区
-  "askFirst": ["删数据", "停服", "花钱", "对外发消息"], // 只有这几类事 Agent 才先问你
+  "askFirst": ["删数据", "停服", "花钱", "对外发消息", "改产品方向", "新建或轮换密钥", "修改权限"], // 只有这几类事 Agent 才先问你；不写就是这 7 类
   "sources": { "shop": { "name": "shop" }, "github": { "name": "GitHub", "adapter": "github" } },
   "agents": {
     "claude": {
@@ -200,9 +200,9 @@ GET /v1/work?claim=<这次领活的编号>&wait=50&running=7,8&capacity=1    Aut
   "askFirst": ["删数据", "…"],
   "context": {           // 接单程序把它写成文件交给 Agent，都是资料
     "events":  [{ "id", "source", "sourceName", "type", "subject", "summary", "detail", "link", "receivedAt" }],
-    "answers": [{ "card", "title", "options", "choice", "chosen", "text", "about", "by", "at" }],  // 这一轮要接着做的决定；choice 是从 0 起的下标，chosen 是所选那项的文字，自由文字回答时就是那句回答
-    "timers":  [{ "key", "about", "at" }],                                               // 这一轮到期的复查
-    "waiting": [{ "key", "about", "at" }],                                               // 这个事项还没到期的复查
+    "answers": [{ "card", "title", "options", "choice", "chosen", "text", "about", "by", "at", "events" }],  // 这一轮要接着做的决定；choice 是从 0 起的下标，chosen 是所选那项的文字，自由文字回答时就是那句回答；events 是提问那一轮处理的事件 id，若由回答或复查叫醒，则沿已有记录追溯原事件；外部业务可以用它把结果对回自己发出的事件。独立提问的 events 为空。
+    "timers":  [{ "key", "about", "at", "events" }],                                     // 这一轮到期的复查；events 是约这次复查的那一轮在做的事件的 id，业务靠它对回自己给的 id
+    "waiting": [{ "key", "about", "at", "events" }],                                     // 这个事项还没到期的复查，字段与 timers 相同
     "open":    [{ "card", "title", "text", "at" }],                                      // 同来源同组还没收尾的卡片
     "decided": [{ "card", "title", "choice", "at" }]                                     // 这个事项定过的事，只对当时那件事有效；choice 已是所选那项的文字，不是下标
   }
@@ -576,7 +576,7 @@ Apple M5 Pro、24 GB、Node 24.21.0，用 `node scripts/history.ts 1000 10000 10
 | 发布               | 等一个覆盖合并提交的 Ship 成功，再核对健康版本；健康 HTTP 200 不能覆盖 Ship 失败或尚未完成                                                                                                                                                            |
 | 后续发布           | 新版覆盖且确实上线可以完成旧交付；已经完成的交付不因后来的失败发布倒退                                                                                                                                                                                |
 
-等待完整检查时，当前提交最新的 `pull_request` 运行必须比转正式前记录的检查编号更新。该运行处于 `queued`、`waiting` 或 `pending`，完整 jobs 列表为空，且从 `created_at` 起超过 10 分钟，判为 GitHub 收下检查后没有开始执行。插件把 PR 转草稿再转正式，自救一次。转正式前重新记录最新的 `pull_request` 运行编号，排除转草稿触发的检查，只接受之后的新运行。自救记录与提交绑定，执行期间存在 `DeliveryIO.checkRecovery`，需要复查时把检查编号作为 `checkAfter` 写进已有 `delivery-retry` 的 `about` JSON，与 `head` 和错误次数一起保存，下一轮继续使用，提交变化后重新计。新运行也按同样条件卡住时，立即通过交付退回和通知流程说明 GitHub 一直没有开始检查，不计入五次执行错误。已有任何 job 的运行继续等待，其余情况仍受原有 30 分钟等待和错误重试规则约束。`workflow_dispatch` 运行不作为完整检查依据。
+等待完整检查时，当前提交最新的 `pull_request` 运行必须比转正式前记录的检查编号更新。从开始等待（草稿先转正式）起超过 10 分钟仍没有新运行，或者新运行尚未结束、从 `created_at` 起超过 10 分钟仍没有 `check.job` 指定的任务，判为 GitHub 没有开始必需的检查；前置任务已经完成也不能代替必需任务。插件把 PR 转草稿再转正式，自救一次，并从这次转正式重新计时。转正式前重新记录最新的 `pull_request` 运行编号，排除转草稿触发的检查，只接受之后的新运行。自救记录与提交绑定，执行期间存在 `DeliveryIO.checkRecovery`，需要复查时把检查编号作为 `checkAfter` 写进已有 `delivery-retry` 的 `about` JSON，与 `head` 和错误次数一起保存，下一轮继续使用，提交变化后重新计。重新触发后按同样条件再次卡住时，立即通过交付退回和通知流程说明 GitHub 一直没有开始检查，不计入五次执行错误。必需任务已经创建、正在排队或执行时继续等待，不因运行时间长而自救，其余情况仍受原有 30 分钟等待和错误重试规则约束。`workflow_dispatch` 运行不作为完整检查依据。
 
 `deliver-review` 审查通过就结束并移除交付标签。在等待检查期间加上它，合并前也会停在只审查。等待检查时撤回 `deliver` 会结束本轮，并报告 `withdrawn`，表示没有合并或发布。关闭未合并的 PR 先写 `delivery` 失败再清交付标签，不让等待者卡在 pending。默认用中台的失败重试和提问卡片。接入已有交付工具时，`--notify-command` 把 `ask-owner` 转告给通知程序，成功后移除标签。退回写 `delivery` 失败并移除交付标签。已有 `deliver-attended` 的退回等待三分钟，仍未清除才转告。临时错误用中台的一分钟复查重试，GitHub 的 5xx 等平台错误最多 60 次，其他执行错误最多 5 次。每个审查器最多跑 30 分钟，超时算一次执行错误。执行错误的第一行原因写进本轮结果和退回说明，完整原因留在本轮输出。
 

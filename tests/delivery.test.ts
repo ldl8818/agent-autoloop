@@ -18,7 +18,8 @@
 // is asked for while it waits for its check; an out-of-date project toolkit is allowed to merge, an enabled auto-merge
 // survives a failed recheck of that toolkit; a lost auto-merge response triggers a second mutation; a lost branch-update
 // response ignores the already-synchronized head instead of continuing the same handoff; an accepted check with no jobs
-// waits through five half-hour retries, or is restarted repeatedly, and a draft or manual run then authorizes merging.
+// waits through five half-hour retries, or is restarted repeatedly, and a draft or manual run then authorizes merging;
+// a missing ready run or required job never triggers recovery, or recovery reuses the first ready time and refuses too soon.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -697,6 +698,101 @@ const passedJob = { name: "check", status: "completed", conclusion: "success" };
 const stalledReason =
   "GitHub 收下了检查却一直没开始跑（多半是 GitHub 出了事故），已重新触发一次仍不动。等 GitHub 恢复后重新交付。";
 
+test("a missing ready run stalls after ten minutes even when an older passed run exists", async () => {
+  for (const runs of [[], [{ ...run(10, "head"), event: "pull_request" }]]) {
+    const { io, state, jobsRead } = queuedFullCheck();
+    state.checkRuns = runs;
+    const readyAt = state.now;
+    for (const [age, want] of [
+      [0, "waiting"],
+      [10 * 60_000, "waiting"],
+      [10 * 60_000 + 1, "stalled"],
+    ] as const) {
+      state.now = readyAt + age;
+      assert.equal(await fullCheck("head", config, io, 10, readyAt), want);
+    }
+    assert.deepEqual(jobsRead, []);
+  }
+});
+
+test("missing ready runs restart once and get a fresh ten minutes before refusal", async () => {
+  const { io, state, jobsRead } = queuedFullCheck();
+  state.pr.draft = true;
+  let waits = 0;
+  io.wait = async () => {
+    assert.ok(++waits <= 4);
+    assert.deepEqual(
+      state.writes.filter((path: string) => /\/(draft|ready)$/.test(path)),
+      waits <= 2 ? ["pulls/1/ready"] : ["pulls/1/ready", "pulls/1/draft", "pulls/1/ready"],
+    );
+    state.now += waits % 2 ? 10 * 60_000 : 1;
+  };
+  await assert.rejects(
+    () => deliver("example/app", 1, io),
+    (error) => error instanceof DeliveryRefusal && error.message === stalledReason && error.head === "head",
+  );
+  assert.equal(waits, 4);
+  assert.deepEqual(io.checkRecovery, { head: "head", after: 10 });
+  assert.deepEqual(jobsRead, []);
+  assert.equal(state.merges, 0);
+});
+
+const preliminaryJob = { name: "feedback", status: "completed", conclusion: "success" };
+
+test("finished preliminary jobs cannot hide a required job missing for over ten minutes", async () => {
+  for (const status of ["queued", "in_progress", "completed"]) {
+    const { io, state } = queuedFullCheck(status, 0, [preliminaryJob]);
+    const createdAt = state.now;
+    for (const age of [20_000, 10 * 60_000, 10 * 60_000 + 1]) {
+      state.now = createdAt + age;
+      const want = status !== "completed" && age > 10 * 60_000 ? "stalled" : "waiting";
+      assert.equal(await fullCheck("head", config, io), want);
+    }
+  }
+});
+
+test("a missing required job restarts the check and its fresh ready run can merge", async () => {
+  const { io, state, checkJobs, jobsRead } = queuedFullCheck("in_progress", 10 * 60_000 + 1, [preliminaryJob]);
+  const { api } = io;
+  io.api = async (path, body, method) => {
+    const result = await api(path, body, method);
+    if (path === "pulls/1/ready") {
+      state.checkRuns.push({
+        ...run(12, "head", "in_progress", null),
+        event: "pull_request",
+        created_at: new Date(state.now).toISOString(),
+      });
+      checkJobs.set(12, [preliminaryJob]);
+    }
+    return result;
+  };
+  let waits = 0;
+  io.wait = async () => {
+    assert.equal(++waits, 1);
+    assert.deepEqual(
+      state.writes.filter((path: string) => /\/(draft|ready)$/.test(path)),
+      ["pulls/1/draft", "pulls/1/ready"],
+    );
+    Object.assign(state.checkRuns[1], { status: "completed", conclusion: "success" });
+    checkJobs.set(12, [preliminaryJob, passedJob]);
+  };
+  assert.equal((await deliver("example/app", 1, io)).merged, "merged");
+  assert.deepEqual(jobsRead, [10, 12, 12]);
+  assert.equal(waits, 1);
+  assert.equal(state.merges, 1);
+});
+
+test("a required job appearing within ten minutes can keep running beyond the stall time", async () => {
+  for (const name of ["check", "check (ubuntu-latest)"]) {
+    const { io, state, checkJobs } = queuedFullCheck("in_progress", 9 * 60_000, [preliminaryJob]);
+    assert.equal(await fullCheck("head", config, io), "waiting");
+    checkJobs.set(10, [preliminaryJob, { name, status: "in_progress", conclusion: null }]);
+    assert.equal(await fullCheck("head", config, io), "waiting");
+    state.now += 20 * 60_000;
+    assert.equal(await fullCheck("head", config, io), "waiting");
+  }
+});
+
 test("an old accepted check without jobs is restarted once and only its new ready run can merge", async () => {
   for (const status of ["queued", "waiting", "pending"]) {
     const { io, state, checkJobs, jobsRead } = queuedFullCheck(status);
@@ -778,8 +874,8 @@ test("an accepted check within ten minutes keeps waiting without a restart", asy
   }
 });
 
-test("an old check with a queued job keeps waiting for a machine without a restart", async () => {
-  for (const name of ["check", "prepare"]) {
+test("an old check with a queued required job keeps waiting for a machine without a restart", async () => {
+  for (const name of ["check", "check (ubuntu-latest)"]) {
     const { io, state, checkJobs } = queuedFullCheck("queued", 15 * 60_000, [{ name, status: "queued" }]);
     let waits = 0;
     io.wait = async () => {

@@ -114,7 +114,7 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 "channels": { "feishu": { "key": "…", "user": "ou_用户的 open_id" } }
 ```
 
-同一个飞书应用的卡片点击只能有一个监听，只在一台电脑上跑。
+同一个飞书应用的卡片点击只能有一个监听，只在一台电脑上跑。重启后日志说“飞书那边还记着这个应用的另一条事件连接”，是飞书还没放开旧连接，可能要几个小时；中台每分钟重试一次，期间卡片点击收不到。`lark-cli event status`、`event stop` 只管本机，管不了飞书那边的旧连接；别的电脑也在跑这个应用的监听就先停掉它。
 上游原版与定制展示的切换、多项目的名称映射、摘要与折叠详情见[飞书卡片展示](../../docs/protocol.md#飞书卡片展示)。样式和项目标签只影响显示，回答仍按原卡片编号核对，不按正文猜项目。
 定制展示的决定卡保留原选项，并在“其他方案：我来说明”中接收自由文字；用户检查输入或语音转文字后点“按我的说明继续”。上游原版使用展开的回答框和“提交文字”。通道只提交 text，不附带 choice；通知的可选处理说明仍使用原结案入口。自由文字不会改变规则给定的 Agent、目录或权限。
 
@@ -154,13 +154,13 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
   "trusted": [12345678],
   "agents": {
     "codex": null,
-    "claude": { "model": "gpt-6.1-sol", "effort": "xhigh" },
+    "claude": { "model": "gpt-6.2-sol", "effort": "xhigh" },
     "gemini": { "command": ["/绝对路径/reviewer", "{input}"] }
   }
 }
 ```
 
-`agents` 给每个 Agent 写一个审查器：`null` 是免审；`model`、`effort` 是内置 Codex 审查用的模型和推理深度，没写的那项用默认（`gpt-6.1-sol`、`high`）；`command` 换成一条命令，约定同 `review.command`。没列出的 Agent 和没声明来源的改动走默认审查，也就是 `review.command`，没写就是内置 Codex。免审的改动碰到 `xhigh` 的路径或打了 `deliver-review`，照样走默认审查；内置 Codex 在 `xhigh` 的路径上深度不低于 `xhigh`。
+`agents` 给每个 Agent 写一个审查器：`null` 是免审；`model`、`effort` 是内置 Codex 审查用的模型和推理深度，没写的那项用默认（`gpt-6.2-sol`、`high`）；`command` 换成一条命令，约定同 `review.command`。没列出的 Agent 和没声明来源的改动走默认审查，也就是 `review.command`，没写就是内置 Codex。免审的改动碰到 `xhigh` 的路径或打了 `deliver-review`，照样走默认审查；内置 Codex 在 `xhigh` 的路径上深度不低于 `xhigh`。
 
 来源用提交状态声明。整份改动都是同一个 Agent 写的，才在要交付的提交上写这一条，说明里填 Agent 名字（小写字母开头，只用小写字母、数字和 `-`）：
 
@@ -172,7 +172,7 @@ gh api repos/owner/app/statuses/<完整提交编号> -f context=delivery-agent/<
 
 `check.job` 写 job 的名字；矩阵 job（名字像 `check (ubuntu-latest)`）算同一个 job，每一项都要成功。检查工作流的触发类型要带 `ready_for_review`：草稿转 ready 后，只接受这之后新跑的一次检查，而 `pull_request` 默认不在转 ready 时触发。写成 `on: { pull_request: { types: [opened, synchronize, reopened, ready_for_review] } }`。
 
-当前提交最新的 `pull_request` 检查排队超过 10 分钟、一个任务都没创建时，插件会把 PR 转草稿再转正式，重新触发一次，只认可转回正式之后的新检查。同一个提交的自救记录随中台复查保留。新检查超过 10 分钟仍无任务时，交付立即退回，说明 GitHub 收下了检查却一直没有开始，等 GitHub 恢复后重新交付。已有任务在排队等机器时继续等待。其他情况仍最多等待 30 分钟，暂时的 GitHub 或执行错误按原有规则重试。手动触发的 `workflow_dispatch` 检查不作为合并依据。
+开始等待检查（草稿先转正式）后超过 10 分钟仍没有新 `pull_request` 检查，或者新检查尚未结束、创建超过 10 分钟仍没有 `check.job` 指定的必需任务，插件会把 PR 转草稿再转正式，重新触发一次，只认可转回正式之后的新检查，并重新计时。前置任务已经完成也不能代替必需任务。同一个提交的自救记录随中台复查保留。重新触发后按同样条件再次卡住时，交付立即退回，说明 GitHub 收下了检查却一直没有开始，等 GitHub 恢复后重新交付。必需任务已经创建、正在排队等机器或执行时继续等待，不因运行时间长而重新触发。其他情况仍最多等待 30 分钟，暂时的 GitHub 或执行错误按原有规则重试。手动触发的 `workflow_dispatch` 检查不作为合并依据。
 
 规则示例（把绝对路径、接单电脑和仓库改成自己的）：
 

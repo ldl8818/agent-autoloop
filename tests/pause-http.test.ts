@@ -3,6 +3,7 @@
 // paused rule is accepted; the state doesn't show who paused what, why and until when; a task that runs elsewhere, even one that can ask and go on in its cwd, is paused or run as if it were a rule; the
 // command line doesn't reach these doors or says nothing useful. What a pause skipped isn't counted while it lasts, isn't
 // listed in full when it's lifted, takes in what an earlier pause skipped, or can't be replayed in one go after the lift;
+// its count and the events it lists disagree once more were skipped than it lists;
 // the command line doesn't say a pause holds nothing back for later, or leaves the owner to find the skipped events.
 // The state leaves out the model a task elsewhere was registered with, or makes one up for a task that named none.
 import assert from "node:assert/strict";
@@ -132,6 +133,18 @@ test("what a pause skips is counted while it lasts, listed when it's lifted, and
     (await state()).skipped.some((e: any) => e.id === earlier),
     "what the earlier pause skipped stays as it was",
   );
+  // More were skipped than the state lists at a time: the count still says how many, the list keeps the newest.
+  await post(rule("意见", "pause"), { reason: "又来一批" });
+  const many: number[] = [];
+  for (let n = 0; n < 21; n++) many.push(await send(`m${n}`, `#m${n}`));
+  const capped = (await lineOf("意见")).paused.skipped;
+  assert.equal(capped.count, 21, "the count says how many the pause skipped");
+  assert.deepEqual(
+    capped.events.map((e: any) => e.id),
+    many.slice().reverse().slice(0, 20),
+  );
+  assert.equal(capped.events.length, 20, "the list keeps to the newest 20");
+  await post(rule("意见", "resume"));
   const schedule = await post(rule("巡检", "pause"), {});
   assert.equal(schedule.json.paused.skipped, null, "a schedule skips moments, not events");
   await post(rule("巡检", "resume"));

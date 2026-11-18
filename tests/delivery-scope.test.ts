@@ -40,7 +40,7 @@ test("the default review status is neutral and projects can override it", () => 
 test("reviewers by agent need trusted accounts, and a model or depth that can't be read as an option", () => {
   const review = (extra: object) => settings({ ...config, review: { points: "AGENTS.md", ...extra } }).review;
   assert.deepEqual(review({}).agents, {});
-  const agents = { codex: null, claude: { model: "gpt-6.1-sol", effort: "xhigh" }, gemini: { command: ["reviewer"] } };
+  const agents = { codex: null, claude: { model: "gpt-6.2-sol", effort: "xhigh" }, gemini: { command: ["reviewer"] } };
   assert.deepEqual(review({ trusted: [1], agents }).agents, agents);
   for (const wrong of [
     { agents: { codex: null } },
@@ -48,7 +48,7 @@ test("reviewers by agent need trusted accounts, and a model or depth that can't 
     { trusted: [1], agents: { Codex: null } },
     { trusted: [1], agents: { claude: { model: "--unsafe" } } },
     { trusted: [1], agents: { claude: { effort: "x high" } } },
-    { trusted: [1], agents: { claude: { model: "gpt-6.1-sol", command: ["reviewer"] } } },
+    { trusted: [1], agents: { claude: { model: "gpt-6.2-sol", command: ["reviewer"] } } },
     { trusted: [1], agents: { claude: ["codex", "codex"] } },
     { trusted: [1], agents: { claude: { reviewers: 2 } } },
   ])

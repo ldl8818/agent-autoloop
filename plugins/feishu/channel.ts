@@ -4,6 +4,7 @@
 //   "channels": { "feishu": { "key": "…", "user": "ou_xxx" } } in config.json
 //   "channels": { "feishu": { "name": "飞书", "answerers": ["ou_xxx"] } } in rules.json: who may answer.
 import { execFile, spawn } from "node:child_process";
+import { setTimeout as wait } from "node:timers/promises";
 import type { Card, ChannelContext } from "../../host/channels.ts";
 import { eachLine } from "../../host/lines.ts";
 import { commandLine } from "../../host/command.ts";
@@ -427,6 +428,9 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
   }
 
   async function listen() {
+    // Feishu can go on counting a connection that's gone (often the one from before a restart) for hours, and lark-cli
+    // refuses every listener until it lets go; `event status` and `event stop` only reach this computer's bus.
+    let refused = false;
     while (!signal.aborted) {
       // stdin stays open: lark-cli ends an unbounded consume when its stdin closes.
       const consume = spawn(...commandLine([program, "event", "consume", "card.action.trigger", "--as", "bot"]), {
@@ -436,14 +440,24 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
       consume.on("error", (error) => log(`the click listener couldn't run: ${error}`));
       const stop = () => consume.kill();
       signal.addEventListener("abort", stop);
-      eachLine(consume.stderr, log);
+      let conflict = false;
+      eachLine(consume.stderr, (line) => {
+        if (/another event bus is already connected/.test(line)) conflict = true;
+        log(line);
+      });
       eachLine(consume.stdout, (line) => void clicked(line).catch((error) => log(`click not handled: ${error}`)));
       await new Promise((resolve) => consume.on("close", resolve));
       signal.removeEventListener("abort", stop);
-      if (!signal.aborted) {
-        log("the click listener stopped; starting it again in 10 seconds");
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
+      if (signal.aborted) break;
+      if (conflict && !refused) {
+        log(
+          "飞书那边还记着这个应用的另一条事件连接，拒绝再连：在它放开之前卡片点击收不到。" +
+            "常见于刚重启，旧连接可能要几个小时才放开；别的电脑也在跑这个应用的监听就先停掉它。1 分钟后再试，连上前不再重复这条。",
+        );
       }
+      refused = conflict;
+      if (!conflict) log("the click listener stopped; starting it again in 10 seconds");
+      await wait(conflict ? 60_000 : 10_000, undefined, { signal }).catch(() => {});
     }
   }
 

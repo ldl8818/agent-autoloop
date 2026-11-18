@@ -30,7 +30,7 @@ export function parseReview(text: string): Finding[] {
   return value.findings;
 }
 
-export function codexCommand(output: string, effort: string, model = "gpt-6.1-sol") {
+export function codexCommand(output: string, effort: string, model = "gpt-6.2-sol") {
   return [
     "exec",
     "--ignore-user-config",

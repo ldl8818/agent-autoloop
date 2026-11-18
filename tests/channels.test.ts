@@ -11,6 +11,8 @@
 // A U+2028 or U+2029 in what someone typed, which JSON leaves as it is, cuts the click's line and loses the click.
 // Older lark-cli releases reject `--content -`, so a first card must not depend on that stdin convention.
 // Switching to the upstream card must restore its full text and visible answer form without changing callback identity.
+// Feishu still counting an old connection of the app makes lark-cli refuse every listener for hours: retried every ten
+// seconds, unexplained, that floods the log and hides that clicks aren't arriving; waiting it out mustn't hold up stopping.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -320,6 +322,42 @@ test("feishu: a lark-cli that can't be started is said, not left to take the hub
   const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(5_000)]);
   await feishu({ hub: hub as any, options: { user: "ou_me", lark: join(dir, "not-there") }, log, signal });
   assert.match(lines[0] ?? "", /ENOENT/);
+});
+
+test("feishu: a listener Feishu refuses for another connection is explained and tried again slowly", async () => {
+  const calls = join(dir, "lark-refused.log");
+  const lark = join(dir, "lark-cli-refused");
+  writeFileSync(
+    lark,
+    `#!/bin/sh
+case "$*" in
+  *"event consume"*)
+    echo consume >> "${calls}"
+    echo "Error: failed_precondition: another event bus is already connected to this app (1 remote event connection(s) detected via API)" >&2
+    exit 1 ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  const stop = new AbortController();
+  const lines: string[] = [];
+  const hub = {
+    nextCard: () => new Promise((resolve) => stop.signal.addEventListener("abort", () => resolve({ card: null }))),
+  };
+  setTimeout(() => stop.abort(), 1_500);
+  const started = Date.now();
+  await feishu({
+    hub: hub as any,
+    options: { user: "ou_me", lark },
+    log: (line) => lines.push(line),
+    signal: stop.signal,
+  });
+  assert.ok(Date.now() - started < 4_000, "stopping doesn't wait out the pause before the next try");
+  assert.equal(readFileSync(calls, "utf8"), "consume\n");
+  const said = lines.join("\n");
+  assert.match(said, /卡片点击收不到/);
+  assert.match(said, /1 分钟后再试/);
+  assert.doesNotMatch(said, /10 seconds/);
 });
 
 test("feishu: a first card works without lark-cli's stdin content convention", async () => {

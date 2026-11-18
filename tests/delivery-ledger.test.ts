@@ -97,7 +97,7 @@ console.log(JSON.stringify({findings:diff.includes('bad change')?[{title:'有问
         verifyOnly,
       });
     const builtin = { ...config, review: { ...config.review, command: undefined } };
-    pr.body += `\n\n## Codex 审查\n\n第 1 轮（gpt-6.1-sol，high，审到 ${pr.head.sha.slice(0, 12)}）：没有发现问题。\n`;
+    pr.body += `\n\n## Codex 审查\n\n第 1 轮（gpt-6.2-sol，high，审到 ${pr.head.sha.slice(0, 12)}）：没有发现问题。\n`;
     assert.deepEqual(await run(true, builtin), { changed: true });
     pr.body = original;
     assert.equal(((await run()) as unknown[]).length, 1);
@@ -144,17 +144,17 @@ console.log(JSON.stringify({findings:diff.includes('bad change')?[{title:'有问
 });
 
 test("a round keeps its credit when the same model reviewed at the same depth, whatever the policy named it", () => {
-  const deep = { name: "codex-deep", model: "gpt-6.1-sol", effort: "xhigh" };
-  const plain = { name: "codex", model: "gpt-6.1-sol", effort: "high" };
+  const deep = { name: "codex-deep", model: "gpt-6.2-sol", effort: "xhigh" };
+  const plain = { name: "codex", model: "gpt-6.2-sol", effort: "high" };
   // An agent's deep reviewer, then nobody declared: the default reviewer raised to xhigh by a deep-review path.
-  assert.ok(reviewCovers({ signature: "codex-deep/gpt-6.1-sol@xhigh", effort: "xhigh" }, [plain], ["xhigh"]));
-  assert.ok(reviewCovers({ signature: "gpt-6.1-sol", effort: "xhigh" }, [deep], ["xhigh"]));
-  assert.ok(!reviewCovers({ signature: "gpt-6.1-sol", effort: "high" }, [plain], ["xhigh"]));
+  assert.ok(reviewCovers({ signature: "codex-deep/gpt-6.2-sol@xhigh", effort: "xhigh" }, [plain], ["xhigh"]));
+  assert.ok(reviewCovers({ signature: "gpt-6.2-sol", effort: "xhigh" }, [deep], ["xhigh"]));
+  assert.ok(!reviewCovers({ signature: "gpt-6.2-sol", effort: "high" }, [plain], ["xhigh"]));
   assert.ok(
-    !reviewCovers({ signature: "codex/gpt-6.1-sol", effort: "high" }, [{ ...plain, model: "other" }], ["high"]),
+    !reviewCovers({ signature: "codex/gpt-6.2-sol", effort: "high" }, [{ ...plain, model: "other" }], ["high"]),
   );
   assert.ok(
-    !reviewCovers({ signature: "codex-deep/gpt-6.1-sol@xhigh", effort: "xhigh" }, [deep, deep], ["xhigh", "xhigh"]),
+    !reviewCovers({ signature: "codex-deep/gpt-6.2-sol@xhigh", effort: "xhigh" }, [deep, deep], ["xhigh", "xhigh"]),
   );
   const command = { name: "custom", command: ["node", "review.mjs"] };
   const recorded = { signature: `command/${"0".repeat(64)}`, effort: "high" };

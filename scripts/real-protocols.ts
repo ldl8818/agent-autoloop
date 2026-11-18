@@ -27,7 +27,7 @@ try {
       ...process.env,
       INITIAL_AGENT_MODE: "read-only",
       NO_BROWSER: "1",
-      CODEX_CONFIG: JSON.stringify({ model: "gpt-6.1-sol", model_reasoning_effort: "low", approval_policy: "never" }),
+      CODEX_CONFIG: JSON.stringify({ model: "gpt-6.2-sol", model_reasoning_effort: "low", approval_policy: "never" }),
     };
     let session: string | null = null;
     for (let n = 0; n < 2; n++) {
@@ -91,7 +91,7 @@ try {
       "--sandbox",
       "read-only",
       "-m",
-      "gpt-6.1-sol",
+      "gpt-6.2-sol",
       "-c",
       'model_reasoning_effort="low"',
       "-c",

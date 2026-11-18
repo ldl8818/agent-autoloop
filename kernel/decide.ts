@@ -7,6 +7,7 @@ import { AuthError, Conflict, InputError, NotFound } from "./errors.ts";
 import { iso, rows, type Change, type Fact, type Row, type Table, type View } from "./evolve.ts";
 import {
   agentsOf,
+  askedAbout,
   cardView,
   configuration,
   eventsOf,
@@ -219,6 +220,8 @@ function recordEvent(
     ...(paused.length && { paused: JSON.stringify(paused) }),
     // Through the source's own door: only these are its to read back (`eventOutcome`), not what the hub made in its name.
     ...(sent && { sent: 1 }),
+    // Questions from a check can be answered after its timer row is gone.
+    ...(event.timer_events !== undefined && { timer_events: event.timer_events }),
     received_at: draft.at,
   }).id;
 }
@@ -440,6 +443,9 @@ function scheduleReview(draft: Draft, run: Row, later: Later) {
     session,
     agent: run.agent,
     hops: hopsOf(draft, run),
+    // Written now, like `hops`: the row names no run for a later round to follow back from, and it is removed when the
+    // round it wakes ends, so the ids are recorded while the round that set the check is still here.
+    events: JSON.stringify(askedAbout(draft.view, run.id)),
   };
   if (existing) return void put(draft, "timers", existing.id, fields);
   const source = sourceOf(draft.view, run.id) ?? SCHEDULE;
@@ -628,7 +634,13 @@ function tick(draft: Draft) {
   const due = rows(draft.view, "timers", { event_id: null }).filter((timer) => Date.parse(timer.at) <= now);
   for (const timer of due.sort((a, b) => a.at.localeCompare(b.at))) {
     const rule = ruleNamed(draft, timer.rule);
-    const event = { id: `timer:${timer.id}`, type: "timer.due", subject: timer.lane, hops: timer.hops ?? 0 };
+    const event = {
+      id: `timer:${timer.id}`,
+      type: "timer.due",
+      subject: timer.lane,
+      hops: timer.hops ?? 0,
+      timer_events: timer.events,
+    };
     const eventId = recordEvent(draft, timer.source, event, rule ? [rule.name] : []);
     if (rule) {
       put(draft, "timers", timer.id, { event_id: eventId });
