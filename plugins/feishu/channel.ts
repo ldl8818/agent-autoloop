@@ -37,47 +37,9 @@ function projectName(card: Card, projects: Record<string, string>) {
   return match?.[1].trim() || card.project || "中台";
 }
 
-/** Translate display labels only; retain the original rule for routing and old card callbacks. */
-function sourceName(card: Card) {
-  const rule = card.rule;
-  if (!rule?.startsWith("caipiao-")) return rule;
-  if (/^caipiao-[\p{Script=Han}]{2,12}$/u.test(rule)) return rule;
-  // Diagnosis and repair rules span functions; their first title line can identify the specific work.
-  if (/^caipiao-(diagnose|development|maintenance)(?:-|$)/u.test(rule)) {
-    const title = (card.taskTitle ?? card.title).split("\n")[0];
-    const functionNames: [RegExp, string][] = [
-      [/补抓|补采/u, "资料补抓"],
-      [/报告|发布/u, "报告发布"],
-      [/开奖/u, "开奖更新"],
-      [/论坛/u, "论坛采集"],
-      [/采集|抓取/u, "网站采集"],
-    ];
-    const functionName = functionNames.find(([pattern]) => pattern.test(title))?.[1];
-    if (functionName) return `caipiao-${functionName}`;
-  }
-  const names: Record<string, string> = {
-    "tracking-evening": "开奖更新",
-    "tracking-noon": "网站采集",
-    "tracking-retry": "资料补抓",
-    catchup: "断网补办",
-    recovery: "更新补办",
-    selfheal: "故障恢复",
-    "forum-fetch": "论坛采集",
-    "forum-catchup": "论坛补抓",
-    "forum-settle": "论坛复盘",
-    diagnose: "故障诊断",
-    development: "功能修复",
-    maintenance: "故障恢复",
-    "decision-acceptance": "结果验收",
-  };
-  const name = Object.keys(names).find((key) => rule === `caipiao-${key}` || rule.startsWith(`caipiao-${key}-`));
-  return `caipiao-${name ? names[name] : "运行维护"}`;
-}
-
 function taskTitleOf(card: Card) {
   if (card.kind === "notice" && card.title === card.rule) {
     if (card.taskTitle?.trim()) return card.taskTitle.trim();
-    if (/^caipiao-[a-z0-9-]+$/u.test(card.rule ?? "")) return sourceName(card)!.replace(/^caipiao-/u, "");
   }
   return card.title;
 }
@@ -133,94 +95,91 @@ function contentOf(card: Card, settled: boolean, title: string) {
   ];
 }
 
-// Upstream v1.8.3 presentation; keep callbacks below compatible with already delivered custom cards.
-function renderUpstream(card: Card) {
-  const outcome = outcomeOf(card);
-  // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
-  const option = (label: string, index: number) => ({
-    tag: "interactive_container",
-    width: "fill",
-    has_border: true,
-    border_color: index === card.recommend ? "blue" : "grey",
-    corner_radius: "8px",
-    padding: "8px 12px 8px 12px",
-    behaviors: [{ type: "callback", value: { card: card.id, choice: index } }],
-    elements: [{ tag: "div", text: { tag: "plain_text", content: label } }],
-  });
-  const afterwards = outcome ? [{ tag: "markdown", content: `**${outcome}**` }] : [];
-  const noteSaid =
-    card.kind === "notice" && card.answer
-      ? [{ tag: "div", text: { tag: "plain_text", content: `处理说明：${card.answer}` } }]
-      : [];
+function standardForm(card: Card) {
   const notice = card.kind === "notice";
   // Both forms submit `note`; an ask uses it as the answer, a notice records it when closing the card.
-  const textForm = [
-    {
-      tag: "form",
-      name: notice ? "handling_note" : `ask_text_${card.id}`,
-      elements: [
-        {
-          tag: "input",
-          name: "note",
-          input_type: "multiline_text",
-          rows: 2,
-          auto_resize: true,
-          max_length: 1000,
-          label: { tag: "plain_text", content: notice ? "处理说明（可不填）" : "选项都不合适，就直接写回答" },
-          label_position: "top",
-          placeholder: {
-            tag: "plain_text",
-            content: notice
-              ? "比如：已回复他视频下周发；或：群发广告，不用管"
-              : "写好点“提交文字”；写了再点选项，文字不会带上",
-          },
-        },
-        {
-          tag: "button",
-          name: notice ? `handling_note_submit_${card.id}` : `ask_text_submit_${card.id}`,
-          form_action_type: "submit",
-          type: notice ? "primary" : "default",
-          text: { tag: "plain_text", content: notice ? "记录并结案" : "提交文字" },
-        },
-      ],
-    },
-  ];
   return {
-    schema: "2.0",
-    config: { update_multi: true, enable_forward: false },
-    header: {
-      title: { tag: "plain_text", content: card.title },
-      // Which rule or task it came from, in every state: cards from many places reach one person.
-      ...(card.rule && card.rule !== card.title
-        ? { subtitle: { tag: "plain_text", content: `来源：${sourceName(card)}` } }
-        : {}),
-      template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
-    },
-    body: {
-      elements: [
-        ...(card.text ? [{ tag: "markdown", content: card.text }] : []),
-        ...(card.state === "open"
-          ? [...(notice ? textForm : []), ...card.options.map(option), ...(notice ? [] : textForm)]
-          : [...afterwards, ...noteSaid]),
-      ],
-    },
+    tag: "form",
+    name: notice ? "handling_note" : `ask_text_${card.id}`,
+    elements: [
+      {
+        tag: "input",
+        name: "note",
+        input_type: "multiline_text",
+        rows: 2,
+        auto_resize: true,
+        max_length: 1000,
+        label: { tag: "plain_text", content: notice ? "处理说明（可不填）" : "选项都不合适，就直接写回答" },
+        label_position: "top",
+        placeholder: {
+          tag: "plain_text",
+          content: notice
+            ? "比如：已回复他视频下周发；或：群发广告，不用管"
+            : "写好点“提交文字”；写了再点选项，文字不会带上",
+        },
+      },
+      {
+        tag: "button",
+        name: notice ? `handling_note_submit_${card.id}` : `ask_text_submit_${card.id}`,
+        form_action_type: "submit",
+        type: notice ? "primary" : "default",
+        text: { tag: "plain_text", content: notice ? "记录并结案" : "提交文字" },
+      },
+    ],
   };
 }
 
+function customAskForm(card: Card) {
+  return {
+    tag: "form",
+    name: `custom_answer_${card.id}`,
+    // Forms cannot be nested inside panels; put the panel inside a root-level form.
+    elements: [
+      {
+        tag: "collapsible_panel",
+        expanded: false,
+        header: { title: { tag: "plain_text", content: "其他方案：我来说明" } },
+        elements: [
+          {
+            tag: "input",
+            input_type: "multiline_text",
+            auto_resize: true,
+            max_length: 1000,
+            name: "answer",
+            rows: 3,
+            required: true,
+            placeholder: { tag: "plain_text", content: "写下您的方案，也可用输入法语音转文字，检查后提交" },
+          },
+          {
+            tag: "button",
+            form_action_type: "submit",
+            type: "primary",
+            name: `custom_answer_submit_${card.id}`,
+            text: { tag: "plain_text", content: "按我的说明继续" },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+type PresentationCard = Card & {
+  sourceLabel?: string;
+  choiceOffset?: number;
+  hideTextAnswer?: boolean;
+};
+
 /** One card, as it looks now: the options while it's open, what became of it after. */
 export function render(
-  card: Card,
+  card: PresentationCard,
   projects: Record<string, string> = {},
   cardStyle: "custom" | "upstream" = "upstream",
 ) {
   const { title, heading } = headingOf(card, projects);
-  if (cardStyle === "upstream") {
-    const original = renderUpstream(card);
-    original.header.title.content = heading;
-    original.body.elements.push({ tag: "div", text: { tag: "plain_text", content: `卡片 #${card.id}` } });
-    return original;
-  }
   const outcome = outcomeOf(card);
+  const open = card.state === "open";
+  const notice = card.kind === "notice";
+  const custom = cardStyle === "custom";
   // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
   const option = (label: string, index: number) => ({
     tag: "interactive_container",
@@ -229,94 +188,49 @@ export function render(
     border_color: index === card.recommend ? "blue" : "grey",
     corner_radius: "8px",
     padding: "8px 12px 8px 12px",
-    behaviors: [{ type: "callback", value: { card: card.id, choice: index } }],
+    behaviors: [{ type: "callback", value: { card: card.id, choice: (card.choiceOffset ?? 0) + index } }],
     elements: [{ tag: "div", text: { tag: "plain_text", content: label } }],
   });
-  const afterwards = outcome ? [{ tag: "markdown", content: `**${outcome}**` }] : [];
-  const noteSaid =
-    card.kind === "notice" && card.answer
+  const afterwards = [
+    ...(outcome ? [{ tag: "markdown", content: `**${outcome}**` }] : []),
+    ...(notice && card.answer
       ? [{ tag: "div", text: { tag: "plain_text", content: `处理说明：${card.answer}` } }]
-      : [];
-  const notice = card.kind === "notice";
-  const input = {
-    tag: "input",
-    input_type: "multiline_text",
-    auto_resize: true,
-    max_length: 1000,
-  };
-  const submit = { tag: "button", form_action_type: "submit", type: "primary" };
-  const textForm = notice
-    ? {
-        tag: "form",
-        name: "handling_note",
-        elements: [
-          {
-            ...input,
-            name: "note",
-            rows: 2,
-            label: { tag: "plain_text", content: "处理说明（可不填）" },
-            label_position: "top",
-            placeholder: { tag: "plain_text", content: "比如：已回复他视频下周发；或：群发广告，不用管" },
-          },
-          {
-            ...submit,
-            name: `handling_note_submit_${card.id}`,
-            text: { tag: "plain_text", content: "记录并结案" },
-          },
-        ],
-      }
-    : {
-        tag: "form",
-        name: `custom_answer_${card.id}`,
-        // Forms cannot be nested inside panels; put the panel inside a root-level form.
-        elements: [
-          {
-            tag: "collapsible_panel",
-            expanded: false,
-            header: { title: { tag: "plain_text", content: "其他方案：我来说明" } },
-            elements: [
-              {
-                ...input,
-                name: "answer",
-                rows: 3,
-                required: true,
-                placeholder: { tag: "plain_text", content: "写下您的方案，也可用输入法语音转文字，检查后提交" },
-              },
-              {
-                ...submit,
-                name: `custom_answer_submit_${card.id}`,
-                text: { tag: "plain_text", content: "按我的说明继续" },
-              },
-            ],
-          },
-        ],
-      };
+      : []),
+  ];
+  const textForm = open && !card.hideTextAnswer ? [custom && !notice ? customAskForm(card) : standardForm(card)] : [];
+  const controls = [
+    ...(notice ? textForm : []),
+    ...(open ? card.options.map(option) : []),
+    ...(notice ? [] : textForm),
+  ];
+  const body = custom
+    ? [...afterwards, ...contentOf(card, !!outcome, title), ...controls]
+    : [...(card.text ? [{ tag: "markdown", content: card.text }] : []), ...(open ? controls : afterwards)];
   return {
     schema: "2.0",
     config: { update_multi: true, enable_forward: false },
     header: {
       title: { tag: "plain_text", content: heading },
-      // Which rule or task it came from, in every state: cards from many places reach one person.
       ...(card.rule && card.rule !== card.title
-        ? { subtitle: { tag: "plain_text", content: `来源：${sourceName(card)}` } }
+        ? { subtitle: { tag: "plain_text", content: `来源：${card.sourceLabel ?? card.rule}` } }
         : {}),
-      template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
+      template: open ? "blue" : card.state === "closed" ? "grey" : "green",
     },
     body: {
-      elements: [
-        ...afterwards,
-        ...noteSaid,
-        ...contentOf(card, !!outcome, title),
-        ...(card.state === "open"
-          ? [...(notice ? [textForm] : []), ...card.options.map(option), ...(notice ? [] : [textForm])]
-          : []),
-        { tag: "div", text: { tag: "plain_text", content: `卡片 #${card.id}` } },
-      ],
+      elements: [...body, { tag: "div", text: { tag: "plain_text", content: `卡片 #${card.id}` } }],
     },
   };
 }
 
-export default async function feishu({ hub, options, log, signal }: ChannelContext) {
+type Render = (card: PresentationCard) => ReturnType<typeof render>;
+type Present = (card: Card, display: Render) => ReturnType<Render> | Promise<ReturnType<Render>>;
+
+export default function feishu(context: ChannelContext) {
+  return withPresentation(context, (card, display) => display(card));
+}
+
+/** Optional local display policy; delivery and callback handling stay in this channel. */
+export async function withPresentation({ hub, options, log, signal }: ChannelContext, present: Present) {
   const program = (options.lark as string | undefined) ?? "lark-cli";
   const lark = async (args: string[], input?: string) => {
     const printed = await new Promise<string>((resolve, reject) => {
@@ -361,12 +275,14 @@ export default async function feishu({ hub, options, log, signal }: ChannelConte
       try {
         const projects = options.projects;
         const content = JSON.stringify(
-          render(
-            card,
-            projects && typeof projects === "object" && !Array.isArray(projects)
-              ? (projects as Record<string, string>)
-              : {},
-            options.cardStyle === "custom" ? "custom" : "upstream",
+          await present(card, (shown) =>
+            render(
+              shown,
+              projects && typeof projects === "object" && !Array.isArray(projects)
+                ? (projects as Record<string, string>)
+                : {},
+              options.cardStyle === "custom" ? "custom" : "upstream",
+            ),
           ),
         );
         let ref = card.ref;

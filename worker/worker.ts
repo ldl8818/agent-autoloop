@@ -401,7 +401,8 @@ export function createWorker({
     if (seen.session) entry.session = seen.session;
     const usage = entry.usage && { usage: entry.usage };
     const known = session && { session };
-    if ((entry.why === "cancel" || entry.why === "timeout") && seen.external) {
+    // A stop controller can exit without reporting anything. Keep the previous uncertainty until it explicitly clears it.
+    if ((entry.why === "cancel" || entry.why === "timeout") && (seen.external ?? entry.externalStop)) {
       entry.externalStop = true;
       entry.unconfirmed = now() + PAUSE;
       save(entry);
@@ -504,7 +505,8 @@ export function createWorker({
         if (entry.why !== "cancel") return conclude(entry, adapter, exitCode());
         // Reporting `cancelled` would release the item while a process may still be in it, which the protocol forbids
         // (docs/protocol.md: 确认组内没有活进程后才交 cancelled). A cancelled run's `failed` isn't tried again.
-        if (read(entry, adapter, exitCode()).external) return conclude(entry, adapter, exitCode());
+        if (entry.externalStop || read(entry, adapter, exitCode()).external)
+          return conclude(entry, adapter, exitCode());
         return endWith(entry, {
           outcome: "failed",
           error: "停止信号发出后没能确认进程组已结束：这一轮按没跑成记，不再重试，进程可能还在。",

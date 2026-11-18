@@ -21,7 +21,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import feishu, { render } from "../plugins/feishu/channel.ts";
+import feishu, { render, withPresentation } from "../plugins/feishu/channel.ts";
 import webhook from "../plugins/webhook/channel.ts";
 import github from "../plugins/github/source.ts";
 import type { Card } from "../host/channels.ts";
@@ -186,47 +186,72 @@ test("a card says which rule or task it came from, in every state, unless its ti
   assert.equal(from({ ...base, kind: "notice", rule: "AIHOT 告警", title: "AIHOT 告警" }), undefined);
 });
 
-test("feishu: caipiao sources name the function in Chinese without changing card identity or answers", () => {
-  const cases = [
-    ["caipiao-diagnose", "修复彩票补抓等待被误报为失败", "资料补抓"],
-    ["caipiao-diagnose", "排查异常回执", "故障诊断"],
-    ["caipiao-tracking-evening-1", "未完成", "开奖更新"],
-    ["caipiao-tracking-noon-1", "未完成", "网站采集"],
-    ["caipiao-tracking-retry-startup", "未完成", "资料补抓"],
-    ["caipiao-catchup-startup", "未完成", "断网补办"],
-    ["caipiao-recovery-1", "未完成", "更新补办"],
-    ["caipiao-selfheal-1", "未完成", "故障恢复"],
-    ["caipiao-forum-fetch-1", "未完成", "论坛采集"],
-    ["caipiao-forum-catchup-1", "未完成", "论坛补抓"],
-    ["caipiao-forum-settle-1", "未完成", "论坛复盘"],
-    ["caipiao-development-decision-129-decision-129", "修复补抓等待误报", "资料补抓"],
-    ["caipiao-development-decision-10-decision-10", "修复报告发布", "报告发布"],
-    ["caipiao-maintenance-incident-1", "排查开奖更新", "开奖更新"],
-    ["caipiao-development-new", "修复异常回执", "功能修复"],
-    ["caipiao-unknown-new-task", "未知任务", "运行维护"],
-    ["caipiao-tracking-retryish", "未知入口", "运行维护"],
-    ["caipiao-diagnose", "排查异常\n后续资料提到补抓", "故障诊断"],
-    ["caipiao-资料补抓", "已知中文功能", "资料补抓"],
-  ];
+test("feishu: both styles use the display-only label and recovery controls without changing the card", () => {
   for (const style of ["upstream", "custom"] as const) {
-    for (const state of ["open", "decided", "done", "closed"] as const) {
-      for (const [rule, title, label] of cases) {
-        const input: Card = { ...base, rule, title, state };
-        const original = structuredClone(input);
-        const card = render(input, { "caipiao-": "caipiao" }, style);
-        assert.equal((card.header as any).subtitle.content, `来源：caipiao-${label}`, `${style}/${state}/${rule}`);
-        assert.deepEqual(input, original);
-        if (state === "open") {
-          const option = card.body.elements.find((e) => e.tag === "interactive_container") as any;
-          assert.deepEqual(option.behaviors[0].value, { card: base.id, choice: 0 });
-        }
-      }
-      const other = render({ ...base, rule: "proxy-diagnose", title: "彩票补抓", state }, {}, style);
-      assert.equal((other.header as any).subtitle.content, "来源：proxy-diagnose");
-    }
-    const receipt = render({ ...base, kind: "notice", title: "彩票业务回执", rule: undefined }, {}, style);
-    assert.equal((receipt.header as any).subtitle, undefined);
+    const input = {
+      ...base,
+      rule: "project-diagnose",
+      sourceLabel: "项目诊断",
+      choiceOffset: 100,
+      hideTextAnswer: true,
+    };
+    const original = structuredClone(input);
+    const card = render(input, {}, style);
+    assert.equal(card.header.subtitle?.content, "来源：项目诊断");
+    assert.deepEqual(input, original);
+    assert.ok(card.body.elements.every((element) => element.tag !== "form"));
+    const option = card.body.elements.find((element) => element.tag === "interactive_container") as any;
+    assert.deepEqual(option.behaviors[0].value, { card: base.id, choice: 100 });
+    const ordinary = render({ ...base, rule: "project-diagnose" }, {}, style);
+    assert.equal(ordinary.header.subtitle?.content, "来源：project-diagnose");
   }
+});
+
+test("feishu: a local presentation failure is reported for that card and the next card can still be sent", async () => {
+  const lark = join(dir, "lark-cli-presentation");
+  writeFileSync(
+    lark,
+    `#!/bin/sh
+if [ "$1" = event ]; then exec sleep 30; fi
+echo '{"ok":true,"data":{"message_id":"ordinary-message"}}'
+`,
+    { mode: 0o700 },
+  );
+  const stop = new AbortController();
+  const cards = [
+    { ...base, id: 17 },
+    { ...base, id: 18 },
+  ];
+  const failed: unknown[][] = [];
+  const delivered: unknown[][] = [];
+  await withPresentation(
+    {
+      hub: {
+        nextCard: async () => {
+          const card = cards.shift() ?? null;
+          if (!card) stop.abort();
+          return { card };
+        },
+        failed: async (...args) => failed.push(args),
+        delivered: async (...args) => {
+          delivered.push(args);
+          stop.abort();
+        },
+        answer: async () => {
+          throw new Error("the fixture sends no clicks");
+        },
+      },
+      options: { user: "ou_me", lark },
+      log: () => {},
+      signal: stop.signal,
+    },
+    (card, display) => {
+      if (card.id === 17) throw new Error("local presentation unavailable");
+      return display(card);
+    },
+  );
+  assert.deepEqual(failed, [[17, 1, "Error: local presentation unavailable"]]);
+  assert.deepEqual(delivered, [[18, 1, "ordinary-message"]]);
 });
 
 test("a card shows its options while it's open, and what became of it after", () => {

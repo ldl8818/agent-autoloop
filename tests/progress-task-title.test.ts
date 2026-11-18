@@ -65,7 +65,7 @@ test("both card styles replace an internal progress title, preserving Chinese ti
     const named = render({ ...base, title: "主人指定的具体事项" }, { "caipiao-": "caipiao" }, style);
     assert.equal(named.header.title.content, "caipiao｜主人指定的具体事项｜进度通知");
     const legacy = render({ ...base, taskTitle: undefined }, { "caipiao-": "caipiao" }, style);
-    assert.equal(legacy.header.title.content, "caipiao｜功能修复｜进度通知");
+    assert.equal(legacy.header.title.content, `caipiao｜${internal.slice(0, 36)}｜进度通知`);
     const fullTitle = "shop-" + "明确指定的中文事项".repeat(8);
     const ask = render(
       {

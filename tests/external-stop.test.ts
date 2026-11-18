@@ -7,6 +7,7 @@ import { setup } from "./helpers.ts";
 
 const home = setup("external-stop");
 const available = join(home, "provider-ready");
+const silent = join(home, "controller-silent");
 const calls = join(home, "calls");
 const ruleFile = join(home, "rules.json");
 process.env.AGENT_AUTOLOOP_RULES = ruleFile;
@@ -16,7 +17,7 @@ writeFileSync(
   `
 export default {
   command: () => ["/bin/sh", "-c", ${JSON.stringify(`echo business >>'${calls}'; printf '{"session":"original","started":true,"external":true}\\n'; sleep 30`)}],
-  cancel: () => ["/bin/sh", "-c", ${JSON.stringify(`echo control >>'${calls}'; if [ -f '${available}' ]; then printf '{"session":"original","started":true,"external":false}\\n'; else printf '{"session":"original","started":true,"external":true}\\n'; exit 1; fi`)}],
+  cancel: () => ["/bin/sh", "-c", ${JSON.stringify(`echo control >>'${calls}'; if [ -f '${available}' ]; then printf '{"session":"original","started":true,"external":false}\\n'; elif [ -f '${silent}' ]; then exit 1; else printf '{"session":"original","started":true,"external":true}\\n'; exit 1; fi`)}],
   read(stdout, code) { const value = JSON.parse(stdout.trim() || '{}'); return {...value, ...(code !== null && {error:'cancel control'})}; },
 };`,
 );
@@ -107,10 +108,11 @@ test(
 );
 
 test(
-  "the real kernel retains a timed-out external turn until confirmation, then retries it as a failure",
+  "a silent stop controller cannot requeue a timed-out external turn before confirmation",
   { skip: process.platform === "win32" },
   async () => {
     rmSync(available, { force: true });
+    writeFileSync(silent, "");
     const before = readFileSync(calls, "utf8")
       .split("\n")
       .filter((line) => line === "business").length;
@@ -162,7 +164,11 @@ test(
     );
     clock += 6 * 60_000;
     await worker.tick();
-    await until(() => worker.entries().some((entry) => entry.unconfirmed !== undefined));
+    await until(() => {
+      const entry = worker.entries().find((entry) => entry.run === run);
+      return !entry || entry.unconfirmed !== undefined;
+    });
+    assert.ok(worker.entries().some((entry) => entry.run === run && entry.unconfirmed !== undefined));
     hub.sweep(clock);
     assert.equal(hub.stateOf(clock).runs.find((entry) => entry.id === run)!.state, "unknown");
     writeFileSync(available, "ready");

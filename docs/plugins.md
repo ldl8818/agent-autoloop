@@ -118,6 +118,10 @@ Claude 委托 Codex 的完整规则、Skill 和参数调用脚本见[浏览器�
 
 通道和中台共用一个 Node 进程，外部调用应异步等待。内置飞书通道的用户查询、发送和更新均异步调用 CLI，发送期间中台仍能接收事件和心跳。
 
+### 飞书本地展示
+
+本地飞书插件可调用安装快照的 `withPresentation(context, present)`。通道把原卡及当前样式的渲染函数交给 `present(card, render)`。本地插件可用渲染副本提供来源名、回调偏移和文字框可见性，也可整理返回的消息结构。保持原卡编号、版本和消息引用。通道沿用原投递、重试和回调检查。某张卡的展示处理失败时，通道报告该卡的失败，继续处理其他卡片。
+
 ## 事件插件
 
 从 [hello-source/source.ts](../examples/plugins/hello-source/source.ts) 开始。它检查 `x-shop-signature` 中的 HMAC-SHA256，再把订单变成事件。
